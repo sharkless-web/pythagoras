@@ -34,4 +34,4 @@ Professor Yoo Ju-han
 Dong-A University
 
 ## Repository Purpose
-This repository is used for the Capstone Design project in the Computer Engineering department at Dong-A University.
+This repository is used for the "Practical SW Development Project I (Comprehensive Design)" course in the Computer Engineering department at Dong-A University.

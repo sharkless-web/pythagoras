@@ -1,0 +1,64 @@
+/* style.css */
+
+/* [기본 배경 및 텍스트] - 검정 바탕 */
+.stApp { 
+    background-color: #000000 !important; 
+    color: #ffffff !important; 
+}
+
+[data-testid="stSidebar"] { 
+    background-color: #000000 !important; 
+    border-right: 1px solid #ffffff !important; 
+}
+
+h1, h2, h3, h4, p, span, label, .stMarkdown, [data-testid="stSidebar"] * { 
+    color: #ffffff !important; 
+}
+
+/* [탭 메뉴: 흰바탕에 검정글씨로 반전] */
+.stTabs [data-baseweb="tab-list"] { 
+    background-color: #000000 !important; 
+    border-bottom: 1px solid #ffffff !important;
+}
+
+.stTabs [data-baseweb="tab"] {
+    background-color: #000000 !important; 
+    color: #ffffff !important; 
+    border: 1px solid #ffffff !important;
+    border-bottom: none !important;
+    border-radius: 12px 12px 0 0 !important;
+    padding: 10px 25px !important;
+}
+
+/* 선택된 탭은 완전 반전 (흰색 배경 / 검정 글씨) */
+.stTabs [aria-selected="true"] {
+    background-color: #ffffff !important; 
+    color: #000000 !important; 
+}
+
+.stTabs [aria-selected="true"] div, 
+.stTabs [aria-selected="true"] p {
+    color: #000000 !important;
+    font-weight: 800 !important;
+}
+
+/* [업로드 박스 및 드롭존] */
+[data-testid="stFileUploaderDropzone"] {
+    background-color: #ffffff !important; 
+    border: 2px dashed #000000 !important; 
+    border-radius: 15px !important;
+}
+
+[data-testid="stFileUploaderDropzone"] * { 
+    color: #000000 !important; 
+    font-weight: 600 !important;
+}
+
+/* [버튼 스타일: 흰색 배경에 검정 글씨] */
+.stButton>button {
+    background-color: #ffffff !important; 
+    color: #000000 !important; 
+    border: 2px solid #ffffff !important;
+    border-radius: 12px !important;
+    font-weight: bold !important;
+}

@@ -1,19 +1,21 @@
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
-import os
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import List
+import numpy as np
+import engine
 
 app = FastAPI()
 
-# 음성 안내 파일들이 저장된 경로
-ASSETS_DIR = "assets"
+# 💡 422 에러 방지: 프론트에서 넘어올 데이터의 '규격'을 정확히 정의합니다.
+class SoundRequest(BaseModel):
+    data: List[float]
+    max_freq: float
 
-@app.get("/guide/{action}")
-async def get_guide_voice(action: str):
-    # 요청된 액션에 맞는 파일 경로 설정
-    file_path = os.path.join(ASSETS_DIR, f"{action}.mp3")
+@app.post("/sonify-data")
+async def sonify_data(req: SoundRequest):
+    # 받은 데이터와 주파수를 기존 engine에 넘겨서 오디오 파일 생성
+    audio_vf = engine.generate_stereo_sound(np.array(req.data), req.max_freq)
     
-    if os.path.exists(file_path):
-        return FileResponse(file_path)
-    return {"error": "File not found"}
-
-# 가청화 엔진 로직도 나중에 여기 @app.post로 옮기면 됩니다!
+    # 생성된 WAV 파일을 프론트엔드로 전송
+    return StreamingResponse(audio_vf, media_type="audio/wav")

@@ -7,70 +7,93 @@ import engine
 from streamlit.components.v1 import html
 from streamlit_cropper import st_cropper
 
-# 백엔드(FastAPI) 서버 주소 설정
+# 백엔드 서버 주소 설정
 SERVER_URL = "http://127.0.0.1:8000" 
 
 def load_css(file_name):
-    """외부 CSS 파일을 로드하여 스트림릿 UI에 적용함"""
+    """외부 CSS 파일을 로드하여 스트림릿 UI에 적용"""
     with open(file_name, encoding="utf-8") as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 
 st.set_page_config(page_title="Project Pythagoras", page_icon="📐", layout="wide")
 
-# 사이드바 패널: 접근성 및 오디오 파라미터 제어
+# 사이드바 패널
 with st.sidebar:
     st.title("Project Pythagoras")
     st.markdown("---")
     st.subheader("👁️ 접근성 설정")
     
-    # 고대비 모드 활성화 시 style.css 주입
     high_contrast = st.toggle("고대비 모드 (흑백)", value=False)
     if high_contrast:
         load_css("style.css")
     
     st.subheader("⚙️ 사운드 설정")
-    # 사용자의 가청 범위를 고려한 주파수 필터 슬라이더
     max_freq = st.slider("최대 주파수 설정 (Hz)", 1000, 5000, 1800, step=100)
     st.divider()
     st.info("💡 본 시스템은 저시력자 및 시각장애인 사용자의 데이터 접근성을 위해 설계되었습니다.")
     st.caption("© 2026 팀 피타고라스")
 
-# 메인 대시보드 UI
 st.title("🎧 멀티모달 가청화 시스템")
 st.divider()
 
-# 멀티모달 대응을 위한 탭 구조 (CSV/이미지)
+# 멀티모달 대응을 위한 탭 구조
 t1, t2 = st.tabs(["📊 CSV 데이터 변환", "🖼️ 이미지 분석"])
 
+# 탭 1: CSV 데이터 가청화 처리 로직
 # 탭 1: CSV 데이터 가청화 처리 로직
 with t1:
     up_csv = st.file_uploader("CSV 파일을 업로드하세요", type=['csv'], key="csv_up")
     if up_csv:
         df = pd.read_csv(up_csv)
-        st.line_chart(df) # 데이터 시각화 프리뷰
         
-        # 수치 데이터만 선별하여 백엔드 전송 준비
+        # [수정 1] 첫 번째 열이 시간이나 인덱스 성격의 데이터라면 X축(Index)으로 강제 지정
+        first_col = df.columns[0]
+        if first_col.lower() in ['time', 'date', 'index', '시간', '날짜', '기간', 'year', 'month', 'day',
+                                'datetime', 'timestamp', 'epoch', 't', '일자', '연도', '년도', '분기', '주차', 
+                                'id', 'no', '번호', '순번', 'idx']:
+            df.set_index(first_col, inplace=True)
+            
         nums = df.select_dtypes(include=[np.number])
-        for col in nums.columns:
-            st.write(f"**열: {col} 재생**")
+        nums = nums.interpolate(method='linear', limit_direction='both')
+        nums = nums.dropna(axis=1, how='all')
+        
+        if nums.empty:
+            st.warning("가청화할 수 있는 유효한 수치 데이터가 없습니다.")
+        else:
+            # [수정 2] 스케일링 전, 사용자에게 보여줄 원본 최솟값/최댓값 보존
+            original_stats = {}
             
-            # FastAPI 서버로 데이터 전송 및 가청화 사운드 요청
-            payload = {"data": nums[col].values.tolist(), "max_freq": max_freq}
-            res = requests.post(f"{SERVER_URL}/sonify-data", json=payload)
+            for col in nums.columns:
+                col_min = nums[col].min()
+                col_max = nums[col].max()
+                original_stats[col] = (col_min, col_max) 
+                
+                # 데이터 정규화 (엔진 전송용)
+                if col_min != col_max:
+                    nums[col] = (nums[col] - col_min) / (col_max - col_min)
+                else:
+                    nums[col] = 0.5 
+
+            # X축이 Time으로 설정되어 차트가 훨씬 자연스럽게 그려짐
+            st.line_chart(nums) 
+            st.divider()
             
-            if res.status_code == 200:
-                st.audio(res.content, format='audio/wav')
-            else:
-                st.error("서버 연결에 실패했습니다.")
-    
-    # 키보드 접근성(단축키) 향상을 위한 외부 JS 인젝션
-    try:
-        with open("script.js", "r", encoding="utf-8") as f:
-            js_code = f.read()
-            html(f"<script>{js_code}</script>", height=0)
-    except FileNotFoundError:
-        st.error("script.js 파일을 찾을 수 없습니다.")
+            for col in nums.columns:
+                orig_min, orig_max = original_stats[col]
+                
+                # [수정 3] 스크린리더 접근성을 위한 텍스트 마크다운 출력
+                st.markdown(f"### 🎵 데이터: {col}")
+                st.markdown(f"- **원본 최솟값:** `{orig_min:.2f}`")
+                st.markdown(f"- **원본 최댓값:** `{orig_max:.2f}`")
+                
+                payload = {"data": nums[col].values.tolist(), "max_freq": max_freq}
+                res = requests.post(f"{SERVER_URL}/sonify-data", json=payload)
+                
+                if res.status_code == 200:
+                    st.audio(res.content, format='audio/wav')
+                else:
+                    st.error("서버 연결에 실패했습니다.")
 
 # 탭 2: 이미지 데이터 가청화 처리 로직
 with t2:
@@ -80,24 +103,31 @@ with t2:
         
         st.write("**분석할 그래프 영역을 마우스로 드래그하여 지정하세요**")
         
-        # 원본 이미지를 띄우고, 사용자가 선택한 영역만큼 잘라낸 객체를 반환
-        cropped_img = st_cropper(img_raw, realtime_update=True, box_color='#FF0000', aspect_ratio=None, stroke_width=1.0)
+        # 화면 분할 레이아웃 적용 (이미지가 너무 크게 렌더링되는 현상 방지)
+        left_col, right_col = st.columns([6, 4])
+        
+        with left_col:
+            cropped_img = st_cropper(
+                img_raw, 
+                realtime_update=True, 
+                box_color='#FF0000', 
+                aspect_ratio=None, 
+                stroke_width=1.0
+            )
+            
+        with right_col:
+            st.write("**ROI 추출 미리보기**")
+            st.image(cropped_img, use_container_width=True, caption="선택된 관심 영역")
         
         st.divider()
-        st.write("**ROI 추출 결과**")
+        st.write("**추출 데이터 재생**")
         
-        # 엔진에는 원본 전체가 아닌, 사용자가 자른 이미지(cropped_img)를 배열로 변환하여 전달
         y, dbg = engine.extract_color_line(np.array(cropped_img))
         
         c1, c2 = st.columns(2)
-        # 좌측에는 사용자가 최종적으로 자른 영역 표시
-        c1.image(cropped_img, use_container_width=True, caption="선택된 관심 영역(ROI)")
-        # 우측에는 엔진이 처리한 디버깅용 결과물 표시
+        c1.image(cropped_img, use_container_width=True, caption="원본 (크롭됨)")
         c2.image(dbg, use_container_width=True, caption="추출 데이터 라인")
         
-        st.write("**추출 데이터 재생**")
-        
-        # 추출된 데이터를 서버로 전송
         payload_img = {"data": y.tolist(), "max_freq": max_freq}
         res_img = requests.post(f"{SERVER_URL}/sonify-data", json=payload_img)
         
@@ -105,3 +135,11 @@ with t2:
             st.audio(res_img.content, format='audio/wav')
         else:
             st.error("서버 연결에 실패했습니다.")
+
+# 글로벌 JS 단축키 스크립트 
+try:
+    with open("script.js", "r", encoding="utf-8") as f:
+        js_code = f.read()
+        html(f"<script>{js_code}</script>", height=0)
+except FileNotFoundError:
+    pass

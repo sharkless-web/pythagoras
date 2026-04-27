@@ -5,6 +5,7 @@ from PIL import Image
 import requests  
 import engine    
 from streamlit.components.v1 import html
+from streamlit_cropper import st_cropper
 
 # 백엔드(FastAPI) 서버 주소 설정
 SERVER_URL = "http://127.0.0.1:8000" 
@@ -13,6 +14,7 @@ def load_css(file_name):
     """외부 CSS 파일을 로드하여 스트림릿 UI에 적용함"""
     with open(file_name, encoding="utf-8") as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
 
 st.set_page_config(page_title="Project Pythagoras", page_icon="📐", layout="wide")
 
@@ -76,16 +78,26 @@ with t2:
     if up_img:
         img_raw = Image.open(up_img).convert('RGB')
         
-        # 엔진을 통한 이미지 내 그래픽 선(Line) 추출
-        y, dbg = engine.extract_color_line(np.array(img_raw))
+        st.write("**분석할 그래프 영역을 마우스로 드래그하여 지정하세요**")
+        
+        # 원본 이미지를 띄우고, 사용자가 선택한 영역만큼 잘라낸 객체를 반환
+        cropped_img = st_cropper(img_raw, realtime_update=True, box_color='#FF0000', aspect_ratio=None, stroke_width=1.0)
+        
+        st.divider()
+        st.write("**ROI 추출 결과**")
+        
+        # 엔진에는 원본 전체가 아닌, 사용자가 자른 이미지(cropped_img)를 배열로 변환하여 전달
+        y, dbg = engine.extract_color_line(np.array(cropped_img))
         
         c1, c2 = st.columns(2)
-        c1.image(img_raw, use_container_width=True, caption="원본")
-        c2.image(dbg, use_container_width=True, caption="추출 결과")
+        # 좌측에는 사용자가 최종적으로 자른 영역 표시
+        c1.image(cropped_img, use_container_width=True, caption="선택된 관심 영역(ROI)")
+        # 우측에는 엔진이 처리한 디버깅용 결과물 표시
+        c2.image(dbg, use_container_width=True, caption="추출 데이터 라인")
         
         st.write("**추출 데이터 재생**")
         
-        # 추출된 y축 좌표 리스트를 서버로 전송하여 소리로 변환
+        # 추출된 데이터를 서버로 전송
         payload_img = {"data": y.tolist(), "max_freq": max_freq}
         res_img = requests.post(f"{SERVER_URL}/sonify-data", json=payload_img)
         

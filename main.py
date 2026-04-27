@@ -6,17 +6,29 @@ import requests
 import engine    
 from streamlit.components.v1 import html
 from streamlit_cropper import st_cropper
+import base64
 
 # 백엔드 서버 주소 설정
 SERVER_URL = "http://127.0.0.1:8000" 
 
 def load_css(file_name):
-    """외부 CSS 파일을 로드하여 스트림릿 UI에 적용"""
+    # 외부 CSS 파일을 로드하여 스트림릿 UI에 적용
     with open(file_name, encoding="utf-8") as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
-
 st.set_page_config(page_title="Project Pythagoras", page_icon="📐", layout="wide")
+# 이 style은 css에 따로 빼는 순간 고대비 모드에서만 작동하기 때문에 글로벌로 선언
+st.markdown("""
+    <style>
+    /* [그래프 상호작용 잠금] 하위 캔버스 요소까지 마우스 이벤트 완벽 차단 */
+    [data-testid="stArrowVegaLiteChart"],
+    [data-testid="stArrowVegaLiteChart"] div,
+    [data-testid="stArrowVegaLiteChart"] canvas,
+    .vega-embed {
+        pointer-events: none !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # 사이드바 패널
 with st.sidebar:
@@ -41,17 +53,18 @@ st.divider()
 t1, t2 = st.tabs(["📊 CSV 데이터 변환", "🖼️ 이미지 분석"])
 
 # 탭 1: CSV 데이터 가청화 처리 로직
-# 탭 1: CSV 데이터 가청화 처리 로직
 with t1:
     up_csv = st.file_uploader("CSV 파일을 업로드하세요", type=['csv'], key="csv_up")
     if up_csv:
         df = pd.read_csv(up_csv)
         
-        # [수정 1] 첫 번째 열이 시간이나 인덱스 성격의 데이터라면 X축(Index)으로 강제 지정
+        # 첫 번째 열이 시간이나 인덱스 성격의 데이터라면 X축으로 강제 지정
         first_col = df.columns[0]
-        if first_col.lower() in ['time', 'date', 'index', '시간', '날짜', '기간', 'year', 'month', 'day',
-                                'datetime', 'timestamp', 'epoch', 't', '일자', '연도', '년도', '분기', '주차', 
-                                'id', 'no', '번호', '순번', 'idx']:
+        index_keywords = ['time', 'date', 'index', '시간', '날짜', '기간', 'year', 'month', 'day',
+                          'datetime', 'timestamp', 'epoch', 't', '일자', '연도', '년도', '분기', '주차', 
+                          'id', 'no', '번호', '순번', 'idx']
+                          
+        if first_col.lower() in index_keywords:
             df.set_index(first_col, inplace=True)
             
         nums = df.select_dtypes(include=[np.number])
@@ -61,7 +74,7 @@ with t1:
         if nums.empty:
             st.warning("가청화할 수 있는 유효한 수치 데이터가 없습니다.")
         else:
-            # [수정 2] 스케일링 전, 사용자에게 보여줄 원본 최솟값/최댓값 보존
+            # 스케일링 전 원본 최솟값/최댓값 보존
             original_stats = {}
             
             for col in nums.columns:
@@ -69,20 +82,19 @@ with t1:
                 col_max = nums[col].max()
                 original_stats[col] = (col_min, col_max) 
                 
-                # 데이터 정규화 (엔진 전송용)
+                # 데이터 정규화
                 if col_min != col_max:
                     nums[col] = (nums[col] - col_min) / (col_max - col_min)
                 else:
                     nums[col] = 0.5 
 
-            # X축이 Time으로 설정되어 차트가 훨씬 자연스럽게 그려짐
             st.line_chart(nums) 
             st.divider()
             
-            for col in nums.columns:
+            for i, col in enumerate(nums.columns):
                 orig_min, orig_max = original_stats[col]
                 
-                # [수정 3] 스크린리더 접근성을 위한 텍스트 마크다운 출력
+                # 스크린리더 접근성을 위한 텍스트 마크다운 출력
                 st.markdown(f"### 🎵 데이터: {col}")
                 st.markdown(f"- **원본 최솟값:** `{orig_min:.2f}`")
                 st.markdown(f"- **원본 최댓값:** `{orig_max:.2f}`")
@@ -91,7 +103,20 @@ with t1:
                 res = requests.post(f"{SERVER_URL}/sonify-data", json=payload)
                 
                 if res.status_code == 200:
-                    st.audio(res.content, format='audio/wav')
+                    b64_audio = base64.b64encode(res.content).decode("utf-8")
+                    
+                    # HTML과 JS를 결합하여 브라우저 내장 TTS 연동 플레이어 생성
+                    html_code = f"""
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <button id="tts_btn_{i}" 
+                                onclick="window.parent.playTTS({i}, '{col}', {orig_min}, {orig_max})"
+                                style="padding: 8px 15px; border-radius: 8px; border: 1px solid #ccc; background: white; cursor: pointer; font-weight: bold; color: black;">
+                            🔊 음성 안내와 함께 듣기
+                        </button>
+                        <audio id="audio_{i}" src="data:audio/wav;base64,{b64_audio}" controls></audio>
+                    </div>
+                    """
+                    st.components.v1.html(html_code, height=60)
                 else:
                     st.error("서버 연결에 실패했습니다.")
 
@@ -103,8 +128,7 @@ with t2:
         
         st.write("**분석할 그래프 영역을 마우스로 드래그하여 지정하세요**")
         
-        # 화면 분할 레이아웃 적용 (이미지가 너무 크게 렌더링되는 현상 방지)
-        left_col, right_col = st.columns([6, 4])
+        left_col, right_col = st.columns([8, 2])
         
         with left_col:
             cropped_img = st_cropper(

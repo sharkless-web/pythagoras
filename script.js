@@ -1,20 +1,86 @@
 /**
- * Project Pythagoras: Keyboard Shortcut System
- * - U: 파일 업로드 창 열기 (한/영 무관)
- * - Space: 모든 소리 일시 정지 (유령 클릭 방지)
- * - 1~9: 해당 순서의 데이터 가청화 재생 (한/영 무관)
+ * Project Pythagoras: Keyboard Shortcut & TTS System
+ * - U: 파일 업로드 창 열기 
+ * - Space: 모든 소리 및 TTS 일시 정지
+ * - 1~9: 해당 순서의 음성 안내 + 가청화 재생 (CSV 탭 전용)
+ * - [New] 탭 전환 시 모든 소리 자동 정지
  */
 
-// 스트림릿 리로드 시 중복 등록 방지
 if (!window.parent.hasPythagorasShortcut) {
     const doc = window.parent.document;
 
-    doc.addEventListener('keydown', function(e) {
+    const getIframeElements = (selector) => {
+        let elements = [];
+        const iframes = doc.querySelectorAll('iframe');
+        iframes.forEach(iframe => {
+            try {
+                const innerDoc = iframe.contentDocument || iframe.contentWindow.document;
+                if (innerDoc) {
+                    innerDoc.querySelectorAll(selector).forEach(el => elements.push(el));
+                }
+            } catch(err) {} 
+        });
+        return elements;
+    };
+
+    window.parent.playTTS = function(index, colName, minVal, maxVal) {
+        const audios = getIframeElements(`audio#audio_${index}`);
+        if (audios.length > 0) {
+            const targetAudio = audios[0];
+            let playPromise = targetAudio.play();
+            if (playPromise !== undefined) {
+                playPromise.then(() => {
+                    targetAudio.pause();
+                    targetAudio.currentTime = 0;
+                }).catch(err => console.log("Audio pre-warming pending..."));
+            }
+        }
+
+        window.speechSynthesis.cancel();
+
+        const text = `${colName} 데이터의 최소값은 ${minVal.toFixed(2)}이고, 최대값은 ${maxVal.toFixed(2)}입니다. 이어서 재생을 시작합니다.`;
+        const msg = new SpeechSynthesisUtterance(text);
+        msg.lang = 'ko-KR';
+        msg.rate = 1.1;
+
+        const voices = window.speechSynthesis.getVoices();
+        const maleVoice = voices.find(v => v.lang.includes('ko') && (v.name.includes('Male') || v.name.includes('남성')));
+        if (maleVoice) {
+            msg.voice = maleVoice;
+        }
+
+        msg.onend = function() {
+            if (audios.length > 0) {
+                audios[0].play();
+            }
+        };
+
+        window.parent.currentTTS = msg; 
+        window.speechSynthesis.speak(msg);
+    };
+
+    // --- [추가된 기능] 탭 전환 감지 및 오디오 자동 정지 ---
+    doc.addEventListener('click', function(e) {
+        // 스트림릿의 탭 버튼을 다양한 속성으로 넓게 감지합니다.
+        const tabButton = e.target.closest('[data-baseweb="tab"], [data-testid="stTab"], button[role="tab"]');
         
-        // 1. 시스템 단축키(Cmd+R, Cmd+C 등)는 통과
+        // 탭 영역이 클릭되었다면 조건 없이 즉시 모든 소리를 차단합니다.
+        if (tabButton) {
+            window.speechSynthesis.cancel(); // TTS 즉시 정지
+            
+            // 모든 iframe 내부의 오디오 정지
+            const audios = getIframeElements('audio');
+            audios.forEach(a => {
+                a.pause();
+                a.currentTime = 0;
+            });
+            console.log("탭 이동 감지: 오디오 및 TTS 강제 종료");
+        }
+    });
+    // --- 키보드 이벤트 리스너 ---
+    doc.addEventListener('keydown', function(e) {
         if (e.metaKey || e.ctrlKey || e.altKey) return;
 
-        // 2. 현재 포커스 상태 확인 (입력창에서는 단축키 비활성화)
         const active = doc.activeElement;
         const activeTag = active.tagName.toLowerCase();
         const activeType = active.type;
@@ -22,69 +88,52 @@ if (!window.parent.hasPythagorasShortcut) {
         
         if (isTextInput) return;
 
-        // 3. 물리적 키 코드 정의 (한글 'ㅕ' 상태에서도 작동하게 e.code 사용)
         const isUKey = e.code === 'KeyU';
-        const isDigitKey = e.code.startsWith('Digit') && e.code.length === 6; // Digit1 ~ Digit9
+        const isDigitKey = e.code.startsWith('Digit') && e.code.length === 6; 
         const isSpaceKey = e.code === 'Space';
 
-        // 4. 단축키 입력 시 기존 버튼 포커스 해제 (스페이스바 유령 클릭 방지)
         if (isUKey || isDigitKey || isSpaceKey) {
-            if (active && typeof active.blur === 'function') {
-                active.blur();
-            }
+            if (active && typeof active.blur === 'function') active.blur();
         }
 
-        // ==========================================
-        // 기능 1: [ U ] 키 - 파일 업로드 창 열기
-        // ==========================================
         if (isUKey) {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            // 스트림릿의 실제 파일 입력 노드를 찾아 클릭 이벤트를 보냅니다.
+            e.preventDefault(); e.stopPropagation();
             const fileInput = doc.querySelector('input[type="file"]');
-            if (fileInput) {
-                fileInput.click();
-            }
+            if (fileInput) fileInput.click();
             return;
         }
 
-        // ==========================================
-        // 기능 2: [ Space ] 키 - 모든 소리 정지
-        // ==========================================
         if (isSpaceKey) {
-            e.preventDefault();
-            e.stopPropagation();
+            e.preventDefault(); e.stopPropagation();
+            window.speechSynthesis.cancel(); 
             
-            const audios = doc.querySelectorAll('audio');
+            const audios = getIframeElements('audio');
             audios.forEach(a => {
                 a.pause();
-                // a.currentTime = 0; // 필요시 처음으로 되감기 추가 가능
+                a.currentTime = 0;
             });
             return; 
         }
 
-        // ==========================================
-        // 기능 3: [ 1 ~ 9 ] 키 - 데이터 가청화 재생
-        // ==========================================
         if (isDigitKey) {
-            const numStr = e.code.replace('Digit', ''); // 'Digit1'에서 숫자만 추출
-            const index = parseInt(numStr) - 1; 
-            const audioElements = doc.querySelectorAll('audio');
+            const activeTab = doc.querySelector('.stTabs [aria-selected="true"]');
+            const isCsvTabActive = activeTab && activeTab.textContent.includes('CSV');
             
-            if (audioElements.length > index) {
+            if (!isCsvTabActive) {
+                return; 
+            }
+
+            const index = parseInt(e.code.replace('Digit', '')) - 1; 
+            const ttsButtons = getIframeElements(`button#tts_btn_${index}`);
+            
+            if (ttsButtons.length > 0) {
                 e.preventDefault();  
                 e.stopPropagation(); 
-                
-                // 선택한 오디오 재생 (이미 재생 중이면 처음부터 다시)
-                audioElements[index].pause();      
-                audioElements[index].currentTime = 0; 
-                audioElements[index].play();       
+                ttsButtons[0].click(); 
             }
         }
     });
     
-    // 등록 완료 플래그 세우기
     window.parent.hasPythagorasShortcut = true; 
-    console.log("🚀 [Pythagoras] 단축키 시스템 로드 완료 (한/영 대응 버전)");
+    console.log("🚀 [Pythagoras] 단축키 로드 완료 (탭 전환 시 오디오 정지 적용)");
 }

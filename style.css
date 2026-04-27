@@ -60,3 +60,10 @@ h1, h2, h3, h4, p, span, label, .stMarkdown, [data-testid="stSidebar"] * {
     border-radius: 12px !important;
     font-weight: bold !important;
 }
+/* [그래프 상호작용 잠금] 하위 캔버스 요소까지 마우스 이벤트 완벽 차단 */
+[data-testid="stArrowVegaLiteChart"],
+[data-testid="stArrowVegaLiteChart"] div,
+[data-testid="stArrowVegaLiteChart"] canvas,
+.vega-embed {
+    pointer-events: none !important;
+}

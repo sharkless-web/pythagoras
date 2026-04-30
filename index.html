@@ -6,8 +6,34 @@
     <link rel="stylesheet" href="style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* [추가됨] 로딩 스피너 애니메이션 CSS */
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 6px solid #f3f3f3;
+            border-top: 6px solid #ff4757; /* 메인 테마 색상으로 변경 가능 */
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* 버튼 비활성화 상태 스타일 */
+        button:disabled, select:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+    </style>
 </head>
 <body>
+
+<div id="loadingOverlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255, 255, 255, 0.85); z-index: 9999; flex-direction: column; justify-content: center; align-items: center; backdrop-filter: blur(4px);">
+    <div class="spinner"></div>
+    <h2 style="margin-top: 25px; color: #2f3542;">⏳ 로딩 중입니다...</h2>
+    <p style="color: #747d8c; font-size: 16px;">(최대 1분 정도 소요될 수 있습니다)</p>
+</div>
 
 <div class="sidebar">
     <h2>Project Pythagoras</h2>
@@ -68,9 +94,8 @@
     const SERVER_URL = "http://127.0.0.1:8000";
     let globalData = []; 
     let globalMixCandidates = []; 
-    let lineChartInstance = null; // 차트 인스턴스
+    let lineChartInstance = null;
     
-    // 고대비 모드 토글
     function toggleHighContrast() {
         if (document.getElementById('contrastToggle').checked) {
             document.body.classList.add('high-contrast');
@@ -79,11 +104,9 @@
         }
     }
 
-    // TTS 보이스 로딩
     let voices = [];
     window.speechSynthesis.onvoiceschanged = () => { voices = window.speechSynthesis.getVoices(); };
 
-    // 1. 파일 업로드 로직
     document.getElementById('csvInput').addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (!file) return;
@@ -95,7 +118,6 @@
         this.value = ''; 
     });
 
-    // 2. CSV 처리 및 차트 그리기
     function processCSV(data) {
         if (data.length === 0) return alert("데이터가 없습니다.");
         
@@ -103,25 +125,20 @@
         let numericCols = [];
         let labels = [];
 
-        // [추가된 로직] 첫 번째 열이 시간이나 인덱스인지 확인
         const indexKeywords = ['time', 'date', 'index', '시간', '날짜', '기간', 'year', 'month', 'day', 'idx'];
         let firstCol = cols[0];
         let isIndexColumn = indexKeywords.some(keyword => firstCol.toLowerCase().includes(keyword));
 
         if (isIndexColumn) {
-            // 시간/인덱스 열이면 차트의 X축 라벨로만 사용하고, 가청화(소리) 데이터에서는 빼버림
             labels = data.map(row => row[firstCol]);
-            cols.shift(); // 데이터 배열에서 첫 번째 열을 삭제
+            cols.shift(); 
         } else {
-            // 인덱스 열이 없으면 그냥 1, 2, 3... 순번을 X축 라벨로 부여
             labels = Array.from({length: data.length}, (_, i) => i + 1);
         }
 
-        // 나머지 열들에 대해 보간 및 스케일링 진행
         cols.forEach(col => {
             let colData = data.map(row => row[col]);
             if (colData.some(val => typeof val === 'number')) {
-                // 결측치(NaN) 선형 보간
                 for(let i=0; i<colData.length; i++) {
                     if (colData[i] === null || isNaN(colData[i])) {
                         colData[i] = colData[i-1] !== undefined ? colData[i-1] : 0;
@@ -130,26 +147,17 @@
                 
                 let min = Math.min(...colData);
                 let max = Math.max(...colData);
-                
-                // 0.0 ~ 1.0 정규화 (스케일링)
                 let scaledData = colData.map(v => max !== min ? (v - min) / (max - min) : 0.5);
                 
-                numericCols.push({ 
-                    name: col, 
-                    originalMin: min, 
-                    originalMax: max, 
-                    scaledData: scaledData, 
-                    rawData: colData 
-                });
+                numericCols.push({ name: col, originalMin: min, originalMax: max, scaledData: scaledData, rawData: colData });
             }
         });
 
         globalData = numericCols;
-        drawChart(labels, numericCols); // 처리된 라벨을 차트에 전달
+        drawChart(labels, numericCols);
         renderUI();
     }
 
-    // 차트 JS (스트림릿 스타일 라인 차트 구현)
     function drawChart(labels, datasets) {
         const ctx = document.getElementById('lineChart');
         ctx.style.display = 'block';
@@ -158,13 +166,12 @@
         
         const chartDatasets = datasets.map((d, i) => ({
             label: d.name,
-            // [핵심 수정 1] 시각적 트렌드 왜곡을 막기 위해 0.0~1.0으로 정규화된 데이터를 그립니다.
             data: d.scaledData, 
-            borderColor: `hsl(${i * 360 / datasets.length}, 70%, 50%)`,
+            borderColor: `hsl(${i * 137.5 % 360}, 70%, 50%)`,
             borderWidth: 2,
             fill: false,
             tension: 0.1,
-            pointRadius: 3, // 마우스 포인터를 위해 점을 살짝 표시
+            pointRadius: 3, 
             hoverRadius: 6
         }));
 
@@ -175,8 +182,7 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: { 
-                    legend: { display: false },
-                    // [핵심 수정 2] 마우스를 올렸을 때는 정규화된 값이 아닌 '원본 데이터'를 보여줍니다!
+                    legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, padding: 20 } },
                     tooltip: {
                         callbacks: {
                             label: function(context) {
@@ -188,24 +194,22 @@
                         }
                     }
                 },
-                scales: {
-                    x: { grid: { display: false } },
-                    // Y축은 0.0 부터 1.0 까지 고정하여 트렌드 비교에 최적화
-                    y: { 
-                        min: 0, 
-                        max: 1, 
-                        grid: { color: '#e6e9ef' },
-                        ticks: { display: false } // Y축의 0.1, 0.2 숫자는 의미 없으므로 숨김
-                    }
-                }
+                scales: { x: { grid: { display: false } }, y: { min: 0, max: 1, grid: { color: '#e6e9ef' }, ticks: { display: false } } }
             }
         });
     }
-    // 3. UI 렌더링
+
+    // [수정됨] renderUI: 초기 로딩 시 모든 오디오 생성이 완료될 때까지 로딩 화면 표시
     function renderUI() {
         const container = document.getElementById('resultsContainer');
         container.innerHTML = '';
         document.getElementById('mixPanel').style.display = 'block';
+        
+        // 로딩 화면 표시
+        const overlay = document.getElementById('loadingOverlay');
+        overlay.style.display = 'flex';
+
+        let fetchPromises = []; // 모든 API 요청을 담을 배열
 
         globalData.forEach((colData, index) => {
             const card = document.createElement('div');
@@ -218,25 +222,37 @@
                 <div style="display: flex; gap: 15px; align-items: center;">
                     <select id="waveSelect_${index}" onchange="handleWaveChange(${index})" style="padding: 6px; border-radius: 6px;">
                         <option value="sine">기본음 (뚜-)</option>
+                        <option value="triangle">부드러운음 (푸-)</option>
+                        <option value="pulse">명확한음 (칭-)</option>
                         <option value="square">경고음 (삐-)</option>
                         <option value="sawtooth">강조음 (브-)</option>
                     </select>
                     <label><input type="checkbox" id="mixCheck_${index}" onchange="updateMix()"> 🎛️ 믹싱</label>
                     
-                    <button class="btn-outline" onclick="playAudioOnly(${index})">▶️ 바로 듣기</button>
-                    
+                    <button class="btn-outline" id="playBtn_${index}" onclick="playAudioOnly(${index})">▶️ 바로 듣기</button>
                     <button class="btn-outline" id="tts_btn_${index}" onclick="playSingleTTS(${index})">🔊 개별 안내 듣기</button>
                     <audio id="audio_${index}" controls style="display: none;"></audio>
                 </div>
             `;
             container.appendChild(card);
-            fetchAudio(index, colData.scaledData, document.getElementById(`waveSelect_${index}`).value);
+            
+            // Promise 배열에 추가
+            const initialWave = document.getElementById(`waveSelect_${index}`).value;
+            fetchPromises.push(fetchAudio(index, colData.scaledData, initialWave));
         });
         
-        // 렌더링 후 믹싱 체크 상태도 동기화
         updateMix();
+
+        // [추가됨] 모든 데이터를 백엔드에서 다 받아오면 로딩 화면 끄기
+        Promise.all(fetchPromises).then(() => {
+            overlay.style.display = 'none';
+        }).catch(err => {
+            overlay.style.display = 'none';
+            alert("서버 통신 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
+        });
     }
-    // 오디오 및 단축키 로직은 기존 V9과 완전히 동일하게 유지 (서버 통신)
+
+    // fetchAudio는 그대로 유지
     async function fetchAudio(index, dataArray, waveform) {
         const maxFreq = document.getElementById('freqSlider').value;
         const payload = { data: dataArray, max_freq: parseFloat(maxFreq), waveform: waveform };
@@ -244,7 +260,10 @@
             const res = await fetch(`${SERVER_URL}/sonify-data`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             const blob = await res.blob();
             document.getElementById(`audio_${index}`).src = URL.createObjectURL(blob);
-        } catch (error) { console.error("Error:", error); }
+        } catch (error) { 
+            console.error("Error:", error); 
+            throw error; // Promise.all 에서 에러를 감지할 수 있도록 던짐
+        }
     }
 
     function updateMix() {
@@ -257,17 +276,25 @@
         const textEl = document.getElementById('mixListText');
         textEl.innerHTML = globalMixCandidates.length > 0 ? "<strong>현재 믹싱된 데이터:</strong> " + globalMixCandidates.map(c => c.name).join(', ') : "선택된 데이터: 없음";
     }
-        // 드롭다운에서 음색을 변경할 때 실행되는 전용 함수
-    function handleWaveChange(index) {
-        // 1. 믹싱 리스트 텍스트 업데이트
+
+    // [수정됨] 개별 파형 변경 시 일시적으로 버튼 비활성화 (더블 클릭 방지)
+    async function handleWaveChange(index) {
         updateMix(); 
+        const selectEl = document.getElementById(`waveSelect_${index}`);
+        const playBtn = document.getElementById(`playBtn_${index}`);
         
-        // 2. 현재 선택된 음색(sine, square, sawtooth) 가져오기
-        const selectedWave = document.getElementById(`waveSelect_${index}`).value;
+        selectEl.disabled = true;
+        playBtn.innerText = "⏳ 생성 중...";
+        playBtn.disabled = true;
+
+        await fetchAudio(index, globalData[index].scaledData, selectEl.value);
         
-        // 3. 파이썬 서버로 새로운 소리 생성 요청!
-        fetchAudio(index, globalData[index].scaledData, selectedWave);
+        selectEl.disabled = false;
+        playBtn.innerText = "▶️ 바로 듣기";
+        playBtn.disabled = false;
     }
+
+    // [수정됨] 믹싱 버튼 클릭 시 로딩 상태 처리
     async function playMixAudio() {
         if (globalMixCandidates.length === 0) return alert("믹싱할 데이터를 1개 이상 체크해주세요.");
         stopAllAudio();
@@ -277,8 +304,10 @@
             max_freq: parseFloat(document.getElementById('freqSlider').value),
             waveform_list: globalMixCandidates.map(c => c.waveform)
         };
+        
         const btn = document.getElementById('mixBtn');
-        btn.innerText = "⏳ 믹싱 생성 중...";
+        btn.innerHTML = "⏳ 다중 믹싱 병합 및 생성 중... (잠시만 기다려주세요)";
+        btn.disabled = true; // 버튼 연타 방지
 
         try {
             const res = await fetch(`${SERVER_URL}/mix-data`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -286,10 +315,12 @@
             const mixAudio = document.getElementById('mixAudio');
             mixAudio.src = URL.createObjectURL(blob);
             mixAudio.play();
-            btn.innerText = "▶️ 다중 믹싱 재생 (단축키: M)";
         } catch (error) {
-            alert("서버 통신 에러");
-            btn.innerText = "▶️ 다중 믹싱 재생 (단축키: M)";
+            alert("서버 통신 에러가 발생했습니다.");
+        } finally {
+            // 통신이 끝나면 버튼 원상 복구
+            btn.innerHTML = "▶️ 다중 믹싱 생성 및 재생 (단축키: M)";
+            btn.disabled = false;
         }
     }
 
@@ -313,14 +344,13 @@
         window.speechSynthesis.cancel();
         document.querySelectorAll('audio').forEach(a => { a.pause(); a.currentTime = 0; });
     }
-        // [추가됨] TTS 없이 오디오만 다이렉트로 재생
+
     function playAudioOnly(index) {
-        stopAllAudio(); // 다른 소리 끄기
+        stopAllAudio(); 
         const a = document.getElementById(`audio_${index}`);
         if (a && a.src) a.play();
     }
 
-    // 👑 글로벌 단축키 엔진 (크롬 최적화 완료)
     document.addEventListener('keydown', function(e) {
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         const active = document.activeElement;
@@ -339,7 +369,7 @@
         else if (key === 'm' || key === 'ㅡ') {
             e.preventDefault();
             const mixBtn = document.getElementById('mixBtn');
-            if (mixBtn) mixBtn.click();
+            if (mixBtn && !mixBtn.disabled) mixBtn.click();
         }
         else if (!isNaN(parseInt(key)) && parseInt(key) > 0 && parseInt(key) <= 9) {
             e.preventDefault();

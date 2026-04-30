@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# 1. 백엔드(FastAPI) 서버를 백그라운드에서 실행
-echo "🚀 Starting FastAPI Server..."
-uvicorn server:app --host 0.0.0.0 --port 8000 & 
+echo "🚀 FastAPI 서버를 시작합니다..."
+# 1. 백엔드 서버를 백그라운드(&)에서 실행
+uvicorn server:app --reload &
 
-# 2. 잠시 대기 (서버가 완전히 뜰 시간 부여)
+# 2. 서버가 뜰 때까지 2초 대기
 sleep 2
 
-# 3. 프론트엔드(Streamlit) 실행
-echo "🎧 Starting Streamlit UI..."
-streamlit run main.py
+echo "🌐 웹 브라우저를 엽니다..."
+# 3. Mac 기본 브라우저로 HTML 파일 열기 (run -> open)
+open index.html

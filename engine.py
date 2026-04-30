@@ -14,7 +14,7 @@ def _generate_beeps(data_values):
     beep_signal = np.zeros(N)
     beep_length = int(0.1 * config.SAMPLE_RATE) # 0.1초 타격음
     
-    # [수정 1] 절대값(0.99, 0.01)이 아닌 데이터의 실제 최소/최대값을 동적으로 추출
+    # 데이터의 실제 최소/최대값을 동적으로 추출
     min_val, max_val = np.min(data_values), np.max(data_values)
     
     # 데이터가 아예 평탄하면 타격음을 내지 않음
@@ -32,11 +32,13 @@ def _generate_beeps(data_values):
     if len(is_min) > 0 and is_min[0]: min_edges = np.insert(min_edges, 0, 0)
     
     t = np.linspace(0, 0.1, beep_length, endpoint=False)
-    envelope = np.exp(-t * 40) 
     
-    # 최고점은 3000Hz(맑은 핑!), 최저점은 500Hz(묵직한 퉁!)
-    max_beep = np.sin(2 * np.pi * 3000 * t) * envelope * 0.8
-    min_beep = np.sin(2 * np.pi * 500 * t) * envelope * 0.8
+    # 타격음의 여운(꼬리) 감쇠율 조절
+    envelope = np.exp(-t * 20) 
+    
+    # 최고점은 3000Hz, 최저점은 500Hz (볼륨 1.5로 부각)
+    max_beep = np.sin(2 * np.pi * 3000 * t) * envelope * 1.5
+    min_beep = np.sin(2 * np.pi * 500 * t) * envelope * 1.5
     
     for idx in max_edges:
         end_idx = min(idx + beep_length, N)
@@ -53,8 +55,9 @@ def _generate_beeps(data_values):
 # ==========================================
 
 def generate_stereo_sound(data_values, user_max_f, waveform_type="sine"):
-    # [수정 3] 소리 잘림 방지: 앞뒤로 0.1초 여백(Padding) 추가 (값은 유지)
-    print(f"!!! 현재 수신된 음색 파라미터: {waveform_type} !!!") 
+    print(f"!!! [단일] 수신된 음색 파라미터: {waveform_type} !!!") 
+    
+    # 앞뒤 0.1초 패딩 추가
     pad_len = int(0.1 * config.SAMPLE_RATE)
     data_values = np.pad(data_values, (pad_len, pad_len), mode='edge')
     
@@ -72,13 +75,18 @@ def generate_stereo_sound(data_values, user_max_f, waveform_type="sine"):
         
     phases = np.cumsum(freqs) * (2 * np.pi / config.SAMPLE_RATE)
     
-    # [수정 2] 원하시던 직관적인 뚜, 삐, 브 음색 적용 (순수 파형)
-    if waveform_type == "square":
-        wave = signal.square(phases) * 0.8       # '삐' 소리 (8비트 게임 느낌)
-    elif waveform_type == "sawtooth":
-        wave = signal.sawtooth(phases) * 0.8     # '브' 소리 (거친 기계음 느낌)
+    # [음색 확장 5종] 볼륨 밸런스 적용
+    w = str(waveform_type)
+    if "square" in w or "경고" in w:
+        wave = signal.square(phases) * 0.25                  # 사각파 (삐-)
+    elif "sawtooth" in w or "강조" in w:
+        wave = signal.sawtooth(phases) * 0.3                 # 톱니파 (브-)
+    elif "triangle" in w or "부드러운" in w:
+        wave = signal.sawtooth(phases, width=0.5) * 0.5      # 삼각파 (푸-)
+    elif "pulse" in w or "명확한" in w:
+        wave = signal.square(phases, duty=0.2) * 0.3         # 펄스파 (칭-)
     else:
-        wave = np.sin(phases) * 0.8              # '뚜' 소리 (부드러운 기본음)
+        wave = np.sin(phases) * 0.6                          # 사인파 (뚜- / 기본)
         
     wave += _generate_beeps(data_values)
     
@@ -100,8 +108,9 @@ def generate_stereo_sound(data_values, user_max_f, waveform_type="sine"):
 
 def generate_mixed_sound(data_list, max_freq_list, waveform_list):
     if not data_list: return None
+    print(f"!!! [믹싱] 수신된 음색 리스트: {waveform_list} !!!")
     
-    # [수정 3] 다중 채널에도 0.1초 앞뒤 여백 추가
+    # 다중 채널에도 앞뒤 0.1초 패딩 추가
     pad_len = int(0.1 * config.SAMPLE_RATE)
     padded_data_list = [np.pad(data, (pad_len, pad_len), mode='edge') for data in data_list]
     
@@ -121,13 +130,18 @@ def generate_mixed_sound(data_list, max_freq_list, waveform_list):
             
         phases = np.cumsum(freqs) * (2 * np.pi / config.SAMPLE_RATE)
         
-        # [수정 2] 직관적인 음색
-        if wave_type == "square" or "삐" in wave_type or "경고음" in wave_type:
-            wave = signal.square(phases) * 0.8       # '삐' 소리
-        elif wave_type == "sawtooth" or "브" in wave_type or "강조음" in wave_type:
-            wave = signal.sawtooth(phases) * 0.8     # '브' 소리
+        # [음색 확장 5종] 믹싱 시에도 동일한 볼륨 밸런스 적용
+        w = str(wave_type)
+        if "square" in w or "경고" in w:
+            wave = signal.square(phases) * 0.25
+        elif "sawtooth" in w or "강조" in w:
+            wave = signal.sawtooth(phases) * 0.3
+        elif "triangle" in w or "부드러운" in w:
+            wave = signal.sawtooth(phases, width=0.5) * 0.5
+        elif "pulse" in w or "명확한" in w:
+            wave = signal.square(phases, duty=0.2) * 0.3
         else:
-            wave = np.sin(phases) * 0.8
+            wave = np.sin(phases) * 0.6
             
         wave += _generate_beeps(data)
         
@@ -141,6 +155,7 @@ def generate_mixed_sound(data_list, max_freq_list, waveform_list):
     audio_stereo = np.vstack((mixed_left, mixed_right)).T
     max_amp = np.max(np.abs(audio_stereo))
     
+    # 소리 깨짐(클리핑) 방지를 위한 전체 정규화
     if max_amp > 0:
         audio_stereo = np.int16((audio_stereo / max_amp) * 32767)
     else:

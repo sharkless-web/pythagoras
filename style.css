@@ -1,69 +1,141 @@
-/* 기본 배경 및 텍스트 */
-.stApp { 
-    background-color: #000000 !important; 
-    color: #ffffff !important; 
+/* ==========================================
+   기본 스트림릿(Streamlit) 테마 복원
+   ========================================== */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+
+:root {
+    --bg-color: #ffffff;
+    --text-color: #31333F;
+    --sidebar-bg: #f0f2f6;
+    --primary-color: #FF4B4B;
+    --border-color: #e6e9ef;
+    --card-bg: #ffffff;
+    --info-bg: #e8f0fe;
+    --info-text: #1967d2;
 }
 
-[data-testid="stSidebar"] { 
-    background-color: #000000 !important; 
-    border-right: 1px solid #ffffff !important; 
+body {
+    font-family: 'Pretendard', sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    display: flex;
+    min-height: 100vh;
+    transition: all 0.3s ease;
 }
 
-h1, h2, h3, h4, p, span, label, .stMarkdown, [data-testid="stSidebar"] * { 
-    color: #ffffff !important; 
+/* 좌측 사이드바 레이아웃 */
+.sidebar {
+    width: 300px;
+    background-color: var(--sidebar-bg);
+    padding: 30px 20px;
+    box-sizing: border-box;
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
 }
 
-/* [탭 메뉴: 흰바탕에 검정글씨로 반전] */
-.stTabs [data-baseweb="tab-list"] { 
-    background-color: #000000 !important; 
-    border-bottom: 1px solid #ffffff !important;
+/* 우측 메인 컨텐츠 레이아웃 */
+.main-content {
+    flex: 1;
+    padding: 40px 60px;
+    box-sizing: border-box;
+    max-width: 1000px;
 }
 
-.stTabs [data-baseweb="tab"] {
-    background-color: #000000 !important; 
-    color: #ffffff !important; 
-    border: 1px solid #ffffff !important;
-    border-bottom: none !important;
-    border-radius: 12px 12px 0 0 !important;
-    padding: 10px 25px !important;
+/* 텍스트 및 구분선 */
+h1, h2, h3 { font-weight: 700; margin-bottom: 10px; }
+hr { border: 0; border-top: 1px solid var(--border-color); margin: 20px 0; }
+.caption { font-size: 14px; color: #717684; }
+
+/* 스트림릿 특유의 스위치(토글) 및 슬라이더 */
+.toggle-container, .slider-container { margin-bottom: 20px; }
+input[type="range"] { width: 100%; cursor: pointer; }
+
+/* Info 안내 박스 */
+.info-box {
+    background-color: var(--info-bg);
+    color: var(--info-text);
+    padding: 15px;
+    border-radius: 8px;
+    font-size: 14px;
+    line-height: 1.5;
 }
 
-/* 선택된 탭은 완전 반전 (흰색 배경 / 검정 글씨) */
-.stTabs [aria-selected="true"] {
-    background-color: #ffffff !important; 
-    color: #000000 !important; 
+/* 스트림릿 스타일 파일 업로드 박스 */
+.upload-box {
+    background-color: #f8f9fa;
+    border: 1px dashed #caced5;
+    border-radius: 8px;
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: 0.2s;
+    margin-bottom: 30px;
+}
+.upload-box:hover { border-color: var(--primary-color); }
+.upload-box span { color: #717684; font-weight: 500; }
+.upload-box button {
+    margin-top: 15px;
+    background: white;
+    border: 1px solid #caced5;
+    padding: 6px 15px;
+    border-radius: 6px;
+    cursor: pointer;
 }
 
-.stTabs [aria-selected="true"] div, 
-.stTabs [aria-selected="true"] p {
-    color: #000000 !important;
-    font-weight: 800 !important;
+/* 데이터 행 카드 */
+.data-card {
+    border-bottom: 1px solid var(--border-color);
+    padding: 20px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
-/* [업로드 박스 및 드롭존] */
-[data-testid="stFileUploaderDropzone"] {
-    background-color: #ffffff !important; 
-    border: 2px dashed #000000 !important; 
-    border-radius: 15px !important;
+/* 버튼 스타일 */
+.btn-outline {
+    background: white;
+    border: 1px solid #caced5;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+}
+.btn-outline:hover { border-color: var(--primary-color); color: var(--primary-color); }
+.btn-primary {
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    width: 100%;
 }
 
-[data-testid="stFileUploaderDropzone"] * { 
-    color: #000000 !important; 
-    font-weight: 600 !important;
+/* ==========================================
+   [고대비 모드] 태현님이 작성하신 테마 적용
+   ========================================== */
+body.high-contrast {
+    --bg-color: #000000;
+    --text-color: #ffffff;
+    --sidebar-bg: #000000;
+    --border-color: #ffffff;
+    --card-bg: #000000;
+    --info-bg: #ffffff;
+    --info-text: #000000;
 }
 
-/* [버튼 스타일: 흰색 배경에 검정 글씨] */
-.stButton>button {
-    background-color: #ffffff !important; 
-    color: #000000 !important; 
-    border: 2px solid #ffffff !important;
-    border-radius: 12px !important;
-    font-weight: bold !important;
-}
-/* [그래프 상호작용 잠금] 하위 캔버스 요소까지 마우스 이벤트 완벽 차단 */
-[data-testid="stArrowVegaLiteChart"],
-[data-testid="stArrowVegaLiteChart"] div,
-[data-testid="stArrowVegaLiteChart"] canvas,
-.vega-embed {
-    pointer-events: none !important;
+body.high-contrast .sidebar { border-right: 1px solid #ffffff; }
+body.high-contrast .upload-box { background-color: #ffffff; border: 2px dashed #000000; }
+body.high-contrast .upload-box * { color: #000000; font-weight: 800; }
+body.high-contrast .info-box { font-weight: bold; }
+body.high-contrast .btn-outline {
+    background-color: #ffffff; 
+    color: #000000; 
+    border: 2px solid #ffffff;
+    font-weight: 800;
 }

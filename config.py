@@ -1,11 +1,13 @@
-# config.py
+# ==========================================
+# Project Pythagoras Configuration
+# ==========================================
 
-# 사운드 관련 설정
+# 1. 사운드 관련 설정
 DEFAULT_MIN_FREQ = 200.0
-DEFAULT_MAX_FREQ = 1800.0
-TOTAL_PLAY_TIME = 5.0  # 가청화 소리 길이 (초)
-SAMPLE_RATE = 44100
+DEFAULT_MAX_FREQ = 800.0  # 파형 구분을 위해 800Hz로 하향 안정화
+TOTAL_PLAY_TIME = 5.0     # 가청화 소리 길이 (초)
+SAMPLE_RATE = 44100       # CD 음질 표준
 
-# 이미지 처리 관련 설정
-LOWER_COLOR = [0, 50, 50]    # HSV 하한값
-UPPER_COLOR = [179, 255, 255] # HSV 상한값
+# 2. 이미지 처리 관련 설정 (현재 비활성화)
+LOWER_COLOR = [0, 50, 50]
+UPPER_COLOR = [179, 255, 255]

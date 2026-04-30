@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Project Pythagoras</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<div class="sidebar">
+    <h2>Project Pythagoras</h2>
+    <hr>
+    
+    <div>
+        <h4 style="margin-bottom: 10px;">👁️ 접근성 설정</h4>
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+            <input type="checkbox" id="contrastToggle" onchange="toggleHighContrast()">
+            고대비 모드 (흑백)
+        </label>
+    </div>
+    
+    <div>
+        <h4 style="margin-bottom: 10px;">⚙️ 사운드 설정</h4>
+        <div class="caption">최대 주파수 설정 (Hz) <span id="freqVal" style="float: right;">800</span></div>
+        <input type="range" id="freqSlider" min="500" max="5000" step="100" value="800" 
+               oninput="document.getElementById('freqVal').innerText = this.value"
+               onchange="if(globalData.length > 0) renderUI()">
+    </div>
+    <hr>
+    
+    <div class="info-box">
+        💡 본 시스템은 저시력자 및 시각장애인 사용자의 데이터 접근성을 위해 설계되었습니다.
+    </div>
+    <div class="caption" style="margin-top: auto;">© 2026 팀 피타고라스</div>
+</div>
+
+<div class="main-content">
+    <h1>🎧 멀티모달 가청화 시스템</h1>
+    <hr>
+    <h2>📊 CSV 데이터 변환</h2>
+    
+    <div class="caption" style="margin-bottom: 10px;">CSV 파일을 업로드하세요 (단축키: U)</div>
+    
+    <div class="upload-box" onclick="document.getElementById('csvInput').click()">
+        <svg viewBox="0 0 24 24" width="40" height="40" stroke="#717684" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+        <div style="margin-top: 10px;"><span>Drag and drop file here</span></div>
+        <div class="caption">Limit 200MB per file • CSV</div>
+        <button>Browse files</button>
+    </div>
+    <input type="file" id="csvInput" accept=".csv" style="display: none;">
+
+    <canvas id="lineChart" style="max-height: 300px; display: none; margin-bottom: 30px;"></canvas>
+    
+    <hr>
+    <div id="resultsContainer"></div>
+
+    <div id="mixPanel" style="display: none; background: #ffe6e6; padding: 20px; border-radius: 12px; margin-top: 30px; border: 1px solid #ffcccc;">
+        <h3 style="margin-top:0;">🎛️ 다중 열 동시 믹싱 재생</h3>
+        <p id="mixListText" style="color: #333;">선택된 데이터: 없음</p>
+        <button class="btn-primary" id="mixBtn" onclick="playMixAudio()">▶️ 다중 믹싱 생성 및 재생 (단축키: M)</button>
+        <audio id="mixAudio" controls style="width: 100%; display: none;"></audio>
+    </div>
+</div>
+
+<script>
+    const SERVER_URL = "http://127.0.0.1:8000";
+    let globalData = []; 
+    let globalMixCandidates = []; 
+    let lineChartInstance = null; // 차트 인스턴스
+    
+    // 고대비 모드 토글
+    function toggleHighContrast() {
+        if (document.getElementById('contrastToggle').checked) {
+            document.body.classList.add('high-contrast');
+        } else {
+            document.body.classList.remove('high-contrast');
+        }
+    }
+
+    // TTS 보이스 로딩
+    let voices = [];
+    window.speechSynthesis.onvoiceschanged = () => { voices = window.speechSynthesis.getVoices(); };
+
+    // 1. 파일 업로드 로직
+    document.getElementById('csvInput').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        Papa.parse(file, {
+            header: true, dynamicTyping: true, skipEmptyLines: true,
+            complete: function(results) { processCSV(results.data); }
+        });
+        this.value = ''; 
+    });
+
+    // 2. CSV 처리 및 차트 그리기
+    function processCSV(data) {
+        if (data.length === 0) return alert("데이터가 없습니다.");
+        
+        let cols = Object.keys(data[0]);
+        let numericCols = [];
+        let labels = [];
+
+        // [추가된 로직] 첫 번째 열이 시간이나 인덱스인지 확인
+        const indexKeywords = ['time', 'date', 'index', '시간', '날짜', '기간', 'year', 'month', 'day', 'idx'];
+        let firstCol = cols[0];
+        let isIndexColumn = indexKeywords.some(keyword => firstCol.toLowerCase().includes(keyword));
+
+        if (isIndexColumn) {
+            // 시간/인덱스 열이면 차트의 X축 라벨로만 사용하고, 가청화(소리) 데이터에서는 빼버림
+            labels = data.map(row => row[firstCol]);
+            cols.shift(); // 데이터 배열에서 첫 번째 열을 삭제
+        } else {
+            // 인덱스 열이 없으면 그냥 1, 2, 3... 순번을 X축 라벨로 부여
+            labels = Array.from({length: data.length}, (_, i) => i + 1);
+        }
+
+        // 나머지 열들에 대해 보간 및 스케일링 진행
+        cols.forEach(col => {
+            let colData = data.map(row => row[col]);
+            if (colData.some(val => typeof val === 'number')) {
+                // 결측치(NaN) 선형 보간
+                for(let i=0; i<colData.length; i++) {
+                    if (colData[i] === null || isNaN(colData[i])) {
+                        colData[i] = colData[i-1] !== undefined ? colData[i-1] : 0;
+                    }
+                }
+                
+                let min = Math.min(...colData);
+                let max = Math.max(...colData);
+                
+                // 0.0 ~ 1.0 정규화 (스케일링)
+                let scaledData = colData.map(v => max !== min ? (v - min) / (max - min) : 0.5);
+                
+                numericCols.push({ 
+                    name: col, 
+                    originalMin: min, 
+                    originalMax: max, 
+                    scaledData: scaledData, 
+                    rawData: colData 
+                });
+            }
+        });
+
+        globalData = numericCols;
+        drawChart(labels, numericCols); // 처리된 라벨을 차트에 전달
+        renderUI();
+    }
+
+    // 차트 JS (스트림릿 스타일 라인 차트 구현)
+    function drawChart(labels, datasets) {
+        const ctx = document.getElementById('lineChart');
+        ctx.style.display = 'block';
+        
+        if (lineChartInstance) lineChartInstance.destroy();
+        
+        const chartDatasets = datasets.map((d, i) => ({
+            label: d.name,
+            // [핵심 수정 1] 시각적 트렌드 왜곡을 막기 위해 0.0~1.0으로 정규화된 데이터를 그립니다.
+            data: d.scaledData, 
+            borderColor: `hsl(${i * 360 / datasets.length}, 70%, 50%)`,
+            borderWidth: 2,
+            fill: false,
+            tension: 0.1,
+            pointRadius: 3, // 마우스 포인터를 위해 점을 살짝 표시
+            hoverRadius: 6
+        }));
+
+        lineChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: { labels: labels, datasets: chartDatasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { 
+                    legend: { display: false },
+                    // [핵심 수정 2] 마우스를 올렸을 때는 정규화된 값이 아닌 '원본 데이터'를 보여줍니다!
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const datasetIndex = context.datasetIndex;
+                                const dataIndex = context.dataIndex;
+                                const rawValue = datasets[datasetIndex].rawData[dataIndex];
+                                return `${context.dataset.label}: ${rawValue}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { grid: { display: false } },
+                    // Y축은 0.0 부터 1.0 까지 고정하여 트렌드 비교에 최적화
+                    y: { 
+                        min: 0, 
+                        max: 1, 
+                        grid: { color: '#e6e9ef' },
+                        ticks: { display: false } // Y축의 0.1, 0.2 숫자는 의미 없으므로 숨김
+                    }
+                }
+            }
+        });
+    }
+    // 3. UI 렌더링
+    function renderUI() {
+        const container = document.getElementById('resultsContainer');
+        container.innerHTML = '';
+        document.getElementById('mixPanel').style.display = 'block';
+
+        globalData.forEach((colData, index) => {
+            const card = document.createElement('div');
+            card.className = 'data-card';
+            card.innerHTML = `
+                <div>
+                    <h3 style="margin: 0 0 5px 0;">🎵 ${colData.name}</h3>
+                    <div class="caption">원본 최솟값: ${colData.originalMin.toFixed(2)} | 원본 최댓값: ${colData.originalMax.toFixed(2)}</div>
+                </div>
+                <div style="display: flex; gap: 15px; align-items: center;">
+                    <select id="waveSelect_${index}" onchange="handleWaveChange(${index})" style="padding: 6px; border-radius: 6px;">
+                        <option value="sine">기본음 (뚜-)</option>
+                        <option value="square">경고음 (삐-)</option>
+                        <option value="sawtooth">강조음 (브-)</option>
+                    </select>
+                    <label><input type="checkbox" id="mixCheck_${index}" onchange="updateMix()"> 🎛️ 믹싱</label>
+                    
+                    <button class="btn-outline" onclick="playAudioOnly(${index})">▶️ 바로 듣기</button>
+                    
+                    <button class="btn-outline" id="tts_btn_${index}" onclick="playSingleTTS(${index})">🔊 개별 안내 듣기</button>
+                    <audio id="audio_${index}" controls style="display: none;"></audio>
+                </div>
+            `;
+            container.appendChild(card);
+            fetchAudio(index, colData.scaledData, document.getElementById(`waveSelect_${index}`).value);
+        });
+        
+        // 렌더링 후 믹싱 체크 상태도 동기화
+        updateMix();
+    }
+    // 오디오 및 단축키 로직은 기존 V9과 완전히 동일하게 유지 (서버 통신)
+    async function fetchAudio(index, dataArray, waveform) {
+        const maxFreq = document.getElementById('freqSlider').value;
+        const payload = { data: dataArray, max_freq: parseFloat(maxFreq), waveform: waveform };
+        try {
+            const res = await fetch(`${SERVER_URL}/sonify-data`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const blob = await res.blob();
+            document.getElementById(`audio_${index}`).src = URL.createObjectURL(blob);
+        } catch (error) { console.error("Error:", error); }
+    }
+
+    function updateMix() {
+        globalMixCandidates = [];
+        globalData.forEach((colData, index) => {
+            if (document.getElementById(`mixCheck_${index}`).checked) {
+                globalMixCandidates.push({ name: colData.name, data: colData.scaledData, waveform: document.getElementById(`waveSelect_${index}`).value });
+            }
+        });
+        const textEl = document.getElementById('mixListText');
+        textEl.innerHTML = globalMixCandidates.length > 0 ? "<strong>현재 믹싱된 데이터:</strong> " + globalMixCandidates.map(c => c.name).join(', ') : "선택된 데이터: 없음";
+    }
+        // 드롭다운에서 음색을 변경할 때 실행되는 전용 함수
+    function handleWaveChange(index) {
+        // 1. 믹싱 리스트 텍스트 업데이트
+        updateMix(); 
+        
+        // 2. 현재 선택된 음색(sine, square, sawtooth) 가져오기
+        const selectedWave = document.getElementById(`waveSelect_${index}`).value;
+        
+        // 3. 파이썬 서버로 새로운 소리 생성 요청!
+        fetchAudio(index, globalData[index].scaledData, selectedWave);
+    }
+    async function playMixAudio() {
+        if (globalMixCandidates.length === 0) return alert("믹싱할 데이터를 1개 이상 체크해주세요.");
+        stopAllAudio();
+        
+        const payload = {
+            data_list: globalMixCandidates.map(c => c.data),
+            max_freq: parseFloat(document.getElementById('freqSlider').value),
+            waveform_list: globalMixCandidates.map(c => c.waveform)
+        };
+        const btn = document.getElementById('mixBtn');
+        btn.innerText = "⏳ 믹싱 생성 중...";
+
+        try {
+            const res = await fetch(`${SERVER_URL}/mix-data`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const blob = await res.blob();
+            const mixAudio = document.getElementById('mixAudio');
+            mixAudio.src = URL.createObjectURL(blob);
+            mixAudio.play();
+            btn.innerText = "▶️ 다중 믹싱 재생 (단축키: M)";
+        } catch (error) {
+            alert("서버 통신 에러");
+            btn.innerText = "▶️ 다중 믹싱 재생 (단축키: M)";
+        }
+    }
+
+    function playSingleTTS(index) {
+        stopAllAudio();
+        const colData = globalData[index];
+        const text = `${colData.name} 데이터의 최소값은 ${colData.originalMin.toFixed(2)}이고, 최대값은 ${colData.originalMax.toFixed(2)}입니다. 이어서 재생합니다.`;
+        const msg = new SpeechSynthesisUtterance(text);
+        msg.lang = 'ko-KR'; msg.rate = 1.1;
+        const maleVoice = voices.find(v => v.lang.includes('ko') && (v.name.includes('Male') || v.name.includes('남성')));
+        if (maleVoice) msg.voice = maleVoice;
+
+        msg.onend = () => { 
+            const a = document.getElementById(`audio_${index}`);
+            if (a && a.src) a.play(); 
+        };
+        window.speechSynthesis.speak(msg);
+    }
+
+    function stopAllAudio() {
+        window.speechSynthesis.cancel();
+        document.querySelectorAll('audio').forEach(a => { a.pause(); a.currentTime = 0; });
+    }
+        // [추가됨] TTS 없이 오디오만 다이렉트로 재생
+    function playAudioOnly(index) {
+        stopAllAudio(); // 다른 소리 끄기
+        const a = document.getElementById(`audio_${index}`);
+        if (a && a.src) a.play();
+    }
+
+    // 👑 글로벌 단축키 엔진 (크롬 최적화 완료)
+    document.addEventListener('keydown', function(e) {
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
+        const active = document.activeElement;
+        const isTextInput = active && (active.tagName === 'INPUT' && active.type !== 'file' && active.type !== 'checkbox' && active.type !== 'range');
+        if (isTextInput) return;
+
+        const key = e.key.toLowerCase();
+
+        if (key === 'u' || key === 'ㅕ') {
+            e.preventDefault();
+            document.getElementById('csvInput').click();
+        }
+        else if (e.code === 'Space' || key === ' ') {
+            e.preventDefault(); stopAllAudio();
+        }
+        else if (key === 'm' || key === 'ㅡ') {
+            e.preventDefault();
+            const mixBtn = document.getElementById('mixBtn');
+            if (mixBtn) mixBtn.click();
+        }
+        else if (!isNaN(parseInt(key)) && parseInt(key) > 0 && parseInt(key) <= 9) {
+            e.preventDefault();
+            const index = parseInt(key) - 1;
+            const btn = document.getElementById(`tts_btn_${index}`);
+            if (btn) btn.click();
+        }
+    });
+</script>
+</body>
+</html>

@@ -1,28 +1,48 @@
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware  # [추가됨] CORS 통신 모듈
 from pydantic import BaseModel
 from typing import List
 import numpy as np
 import engine
+import config
 
 app = FastAPI()
 
-# 데이터 규격 정의: 클라이언트(Streamlit)와 서버 간의 데이터 송수신 약속
+# [추가됨] 순수 HTML(프론트엔드)에서 백엔드로 요청을 보낼 수 있도록 보안 장벽(CORS) 해제
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 모든 도메인 허용
+    allow_credentials=True,
+    allow_methods=["*"],  # 모든 HTTP 메서드 허용
+    allow_headers=["*"],
+)
+
 class SoundRequest(BaseModel):
-    data: List[float]    # 가청화할 수치 데이터 리스트
-    max_freq: float      # 사용자가 설정한 가청 주파수 상한선
+    data: List[float]    
+    max_freq: float      
+    waveform: str = "sine"
+
+class MixRequest(BaseModel):
+    data_list: List[List[float]]
+    max_freq: float
+    waveform_list: List[str]
+
+def resample_data(data: List[float], target_duration_sec: float, sample_rate: int) -> np.ndarray:
+    target_length = int(target_duration_sec * sample_rate)
+    original_indices = np.linspace(0, 1, len(data))
+    target_indices = np.linspace(0, 1, target_length)
+    return np.interp(target_indices, original_indices, data)
 
 @app.post("/sonify-data")
 async def sonify_data(req: SoundRequest):
-    """
-    데이터 가청화 API 엔드포인트.
-    JSON 포맷으로 받은 수치 데이터를 numpy 배열로 변환하여 사운드 엔진으로 전달함.
-    """
-    
-    # 1. 수치 데이터를 사운드 파형(WAV)으로 변환
-    # engine.generate_stereo_sound는 메모리 내 바이너리 스트림(BytesIO)을 반환함
-    audio_vf = engine.generate_stereo_sound(np.array(req.data), req.max_freq)
-    
-    # 2. 생성된 오디오 데이터를 스트리밍 방식으로 반환
-    # 파일 전체를 저장하지 않고 메모리에서 브라우저로 직접 전송하여 응답 속도 최적화
+    resampled_data = resample_data(req.data, config.TOTAL_PLAY_TIME, config.SAMPLE_RATE)
+    audio_vf = engine.generate_stereo_sound(resampled_data, req.max_freq, req.waveform)
+    return StreamingResponse(audio_vf, media_type="audio/wav")
+
+@app.post("/mix-data")
+async def mix_data(req: MixRequest):
+    resampled_data_list = [resample_data(d, config.TOTAL_PLAY_TIME, config.SAMPLE_RATE) for d in req.data_list]
+    max_freq_list = [req.max_freq] * len(resampled_data_list)
+    audio_vf = engine.generate_mixed_sound(resampled_data_list, max_freq_list, req.waveform_list)
     return StreamingResponse(audio_vf, media_type="audio/wav")

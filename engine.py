@@ -2,86 +2,151 @@ import numpy as np
 import cv2
 import io
 from scipy.io.wavfile import write
+from scipy import signal
 import config
 
-def generate_stereo_sound(data_values, user_max_f):
+def _generate_beeps(data_values):
     """
-    입력된 수치 데이터를 스테레오 사운드로 변환하는 핵심 엔진.
-    데이터 흐름에 따라 주파수(Pitch)와 패닝(L/R)을 동시에 제어함.
+    [핵심 기능] 데이터의 '실제' 최댓값 또는 최솟값에 도달하는 순간을 포착하여 
+    짧고 명확한 타격음(Beep) 파형을 생성합니다.
     """
-    total_steps = len(data_values)
-    if total_steps == 0: return None, None
+    N = len(data_values)
+    beep_signal = np.zeros(N)
+    beep_length = int(0.1 * config.SAMPLE_RATE) # 0.1초 타격음
     
-    # 설정값 로드
-    duration = config.TOTAL_PLAY_TIME / total_steps 
+    # [수정 1] 절대값(0.99, 0.01)이 아닌 데이터의 실제 최소/최대값을 동적으로 추출
+    min_val, max_val = np.min(data_values), np.max(data_values)
+    
+    # 데이터가 아예 평탄하면 타격음을 내지 않음
+    if max_val == min_val:
+        return beep_signal
+        
+    # 부동소수점 오차를 무시하고 정확히 일치하는 지점 찾기
+    is_max = np.isclose(data_values, max_val, atol=1e-5)
+    is_min = np.isclose(data_values, min_val, atol=1e-5)
+    
+    max_edges = np.where(np.diff(is_max.astype(int)) == 1)[0]
+    min_edges = np.where(np.diff(is_min.astype(int)) == 1)[0]
+    
+    if len(is_max) > 0 and is_max[0]: max_edges = np.insert(max_edges, 0, 0)
+    if len(is_min) > 0 and is_min[0]: min_edges = np.insert(min_edges, 0, 0)
+    
+    t = np.linspace(0, 0.1, beep_length, endpoint=False)
+    envelope = np.exp(-t * 40) 
+    
+    # 최고점은 3000Hz(맑은 핑!), 최저점은 500Hz(묵직한 퉁!)
+    max_beep = np.sin(2 * np.pi * 3000 * t) * envelope * 0.8
+    min_beep = np.sin(2 * np.pi * 500 * t) * envelope * 0.8
+    
+    for idx in max_edges:
+        end_idx = min(idx + beep_length, N)
+        beep_signal[idx:end_idx] += max_beep[:end_idx-idx]
+        
+    for idx in min_edges:
+        end_idx = min(idx + beep_length, N)
+        beep_signal[idx:end_idx] += min_beep[:end_idx-idx]
+        
+    return beep_signal
+
+# ==========================================
+# 1. 단일 채널 사운드 엔진
+# ==========================================
+
+def generate_stereo_sound(data_values, user_max_f, waveform_type="sine"):
+    # [수정 3] 소리 잘림 방지: 앞뒤로 0.1초 여백(Padding) 추가 (값은 유지)
+    print(f"!!! 현재 수신된 음색 파라미터: {waveform_type} !!!") 
+    pad_len = int(0.1 * config.SAMPLE_RATE)
+    data_values = np.pad(data_values, (pad_len, pad_len), mode='edge')
+    
+    N = len(data_values)
+    if N == 0: return None
+    
     min_freq = config.DEFAULT_MIN_FREQ
     max_freq = float(user_max_f)
-
-    left_channel, right_channel = [], []
-    current_phase = 0.0 # 주파수 변화 시 노이즈(Clicking) 방지를 위한 페이즈 유지
-    N = int(config.SAMPLE_RATE * duration)
-    total_samples = total_steps * N
     min_val, max_val = np.min(data_values), np.max(data_values)
+    
+    if max_val == min_val:
+        freqs = np.full(N, min_freq)
+    else:
+        freqs = min_freq + (max_freq - min_freq) * ((data_values - min_val) / (max_val - min_val + 1e-9))
+        
+    phases = np.cumsum(freqs) * (2 * np.pi / config.SAMPLE_RATE)
+    
+    # [수정 2] 원하시던 직관적인 뚜, 삐, 브 음색 적용 (순수 파형)
+    if waveform_type == "square":
+        wave = signal.square(phases) * 0.8       # '삐' 소리 (8비트 게임 느낌)
+    elif waveform_type == "sawtooth":
+        wave = signal.sawtooth(phases) * 0.8     # '브' 소리 (거친 기계음 느낌)
+    else:
+        wave = np.sin(phases) * 0.8              # '뚜' 소리 (부드러운 기본음)
+        
+    wave += _generate_beeps(data_values)
+    
+    pan_array = np.linspace(0.0, 1.0, N)
+    left_channel = wave * np.cos(pan_array * np.pi / 2)
+    right_channel = wave * np.sin(pan_array * np.pi / 2)
 
-    for i, value in enumerate(data_values):
-        # 1. 주파수 매핑: 데이터 값이 클수록 고음, 작을수록 저음
-        freq = min_freq if max_val == min_val else min_freq + (max_freq - min_freq) * ((value - min_val) / (max_val - min_val + 1e-9))
-        
-        # 2. 사인파 생성: 시간축(t)에 맞춰 파형 계산
-        t = np.linspace(0, duration, N, False)
-        wave = np.sin(current_phase + freq * t * 2 * np.pi) 
-        current_phase = (current_phase + freq * duration * 2 * np.pi) % (2 * np.pi)
-        
-        # 3. 스테레오 패닝: 시간이 흐를수록 왼쪽(L)에서 오른쪽(R)으로 소리가 넘어감
-        pan_array = np.linspace(i*N / total_samples, (i+1)*N / total_samples, N, False)
-        pan_array = np.clip(pan_array, 0.0, 1.0)
-        
-        # Constant Power Panning 적용 (L/R 볼륨 합을 일정하게 유지)
-        left_channel.extend(wave * np.cos(pan_array * np.pi / 2))
-        right_channel.extend(wave * np.sin(pan_array * np.pi / 2))
-
-    # 데이터 타입 변환: float32 -> int16 (WAV 표준 포맷)
     audio_stereo = np.vstack((left_channel, right_channel)).T
     audio_stereo = np.int16(audio_stereo / (np.max(np.abs(audio_stereo)) + 1e-9) * 32767)
     
-    # 메모리상에 WAV 파일 생성 (디스크 저장 없이 즉시 재생용)
     vf = io.BytesIO()
     write(vf, config.SAMPLE_RATE, audio_stereo)
+    vf.seek(0) 
     return vf
 
-def extract_color_line(opencv_img):
-    """
-    이미지에서 특정 색상의 선(Line)을 추적해서 수치 데이터로 변환.
-    OpenCV 전처리 후 다항 근사화를 통해 노이즈를 제거함.
-    """
-    # 1. 색상 필터링: HSV 영역에서 설정된 컬러 범위만 추출(Masking)
-    hsv = cv2.cvtColor(opencv_img, cv2.COLOR_RGB2HSV)
-    mask = cv2.inRange(hsv, np.array(config.LOWER_COLOR), np.array(config.UPPER_COLOR))
+# ==========================================
+# 2. 다중 채널 믹싱 엔진
+# ==========================================
+
+def generate_mixed_sound(data_list, max_freq_list, waveform_list):
+    if not data_list: return None
     
-    # 2. 노이즈 제거: 모폴로지 연산으로 자잘한 점들 지우기
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3,3), np.uint8), iterations=1)
+    # [수정 3] 다중 채널에도 0.1초 앞뒤 여백 추가
+    pad_len = int(0.1 * config.SAMPLE_RATE)
+    padded_data_list = [np.pad(data, (pad_len, pad_len), mode='edge') for data in data_list]
     
-    h, w = mask.shape
-    raw_x, raw_y = [], []
+    N = len(padded_data_list[0]) 
+    mixed_left = np.zeros(N)
+    mixed_right = np.zeros(N)
     
-    # 3. 픽셀 스캔: 각 x 좌표별로 픽셀이 켜진 y 좌표의 평균값 계산 (선 추적)
-    for x in range(w):
-        y_ids = np.where(mask[:, x] == 255)[0]
-        if len(y_ids) > 0:
-            raw_x.append(x); raw_y.append(h - np.mean(y_ids))
-            
-    if not raw_x: return np.zeros(w), opencv_img
+    for data, max_f, wave_type in zip(padded_data_list, max_freq_list, waveform_list):
+        min_freq = config.DEFAULT_MIN_FREQ
+        max_freq = float(max_f)
+        min_val, max_val = np.min(data), np.max(data)
         
-    # 4. 데이터 최적화: 수천 개의 픽셀 데이터를 주요 포인트(Keypoints) 위주로 단순화(Douglas-Peucker)
-    curve = np.array([[[x, y]] for x, y in zip(raw_x, raw_y)], dtype=np.float32)
-    approx = cv2.approxPolyDP(curve, 0.005 * cv2.arcLength(curve, False), False)
-    key_x, key_y = [pt[0][0] for pt in approx], [pt[0][1] for pt in approx]
+        if max_val == min_val:
+            freqs = np.full(N, min_freq)
+        else:
+            freqs = min_freq + (max_freq - min_freq) * ((data - min_val) / (max_val - min_val + 1e-9))
+            
+        phases = np.cumsum(freqs) * (2 * np.pi / config.SAMPLE_RATE)
+        
+        # [수정 2] 직관적인 음색
+        if wave_type == "square" or "삐" in wave_type or "경고음" in wave_type:
+            wave = signal.square(phases) * 0.8       # '삐' 소리
+        elif wave_type == "sawtooth" or "브" in wave_type or "강조음" in wave_type:
+            wave = signal.sawtooth(phases) * 0.8     # '브' 소리
+        else:
+            wave = np.sin(phases) * 0.8
+            
+        wave += _generate_beeps(data)
+        
+        pan_array = np.linspace(0.0, 1.0, N)
+        left_channel = wave * np.cos(pan_array * np.pi / 2)
+        right_channel = wave * np.sin(pan_array * np.pi / 2)
+        
+        mixed_left += left_channel
+        mixed_right += right_channel
+
+    audio_stereo = np.vstack((mixed_left, mixed_right)).T
+    max_amp = np.max(np.abs(audio_stereo))
     
-    # 5. 보간법(Interpolation): 단순화된 데이터를 다시 전체 이미지 너비(w)에 맞춰 복원
-    data = np.interp(np.arange(w), key_x, key_y)
-    
-    # 디버깅용 이미지 생성: 마스크 이미지 위에 추적된 선을 초록색으로 덧그림
-    dbg_img = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
-    for i in range(len(key_x) - 1):
-        cv2.line(dbg_img, (int(key_x[i]), int(h-key_y[i])), (int(key_x[i+1]), int(h-key_y[i+1])), (0, 255, 0), 2)
-    return data, dbg_img
+    if max_amp > 0:
+        audio_stereo = np.int16((audio_stereo / max_amp) * 32767)
+    else:
+        audio_stereo = np.int16(audio_stereo)
+        
+    vf = io.BytesIO()
+    write(vf, config.SAMPLE_RATE, audio_stereo)
+    vf.seek(0) 
+    return vf

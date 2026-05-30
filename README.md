@@ -169,6 +169,16 @@ python -m http.server 5500
 http://127.0.0.1:5500
 ```
 
+### 빠른 실행 스크립트
+
+Linux/macOS 또는 Git Bash 환경에서는 다음 스크립트로 FastAPI 서버와 웹 UI 정적 서버를 함께 실행할 수 있습니다.
+
+```bash
+./run.sh
+```
+
+현재 실행 구조는 Streamlit이 아니라 `server.py` 기반 FastAPI 백엔드와 `index.html`/`app.js` 기반 웹 프론트엔드입니다.
+
 ## 발표 데모 시나리오
 
 ### 경제 성장률 그래프

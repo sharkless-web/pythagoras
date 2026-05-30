@@ -1,28 +1,207 @@
-# Team Pythagoras
+# 시각 장애인을 위한 시계열 그래프 표현 기술 개발
 
-## Project
-Accessible Time-Series Graph Representation for Visually Impaired Users
+## 프로젝트 개요
 
-## Description
-This project aims to develop a technology that allows visually impaired users to understand time-series graph data through auditory representation.
+이 프로젝트는 시각장애인이 수업 자료, 뉴스 기사, 공공데이터, 보고서 등에 포함된 시계열 그래프를 시각적으로 해석하기 어렵다는 문제를 해결하기 위한 그래프 접근성 프로토타입입니다.
 
-Since conventional graphs rely heavily on visual interpretation, visually impaired users face difficulties in analyzing data. This project converts time-series graph data into sound so that users can recognize trends and patterns through auditory cues.
+핵심 기능은 사용자가 업로드한 시계열 그래프 이미지에서 그래프 흐름을 추출하고, 추세와 특징을 텍스트 설명 및 음향으로 전달하는 것입니다. CSV 데이터 가청화 기능은 제거하지 않고 개발 및 검증용 보조 기능으로 유지합니다.
 
-## Features
-- Convert time-series graph data into sound
-- Represent data value using pitch
-- Represent time flow using playback sequence
-- Web-based interface for interaction
+## 핵심 사용 시나리오
 
-## Tech Stack
-- Python
-- NumPy / Pandas
-- Matplotlib / Plotly
-- PyAudio
-- JavaScript
-- GitHub
+1. 사용자가 시계열 그래프 이미지 또는 주식 캔들 차트 이미지를 업로드합니다.
+2. 필요하면 가격 차트 영역만 직접 드래그하여 지정합니다.
+3. 시스템이 그래프 선 또는 캔들 몸통의 종가 흐름을 추출합니다.
+4. 추출된 시계열 데이터를 분석해 상승, 하락, 전환, 급격한 변화, 최고점, 최저점 등을 설명합니다.
+5. 값은 주파수로, 시간 흐름은 좌우 스테레오 패닝으로 변환해 소리로 재생합니다.
+
+## 주요 기능
+
+- 일반 선 그래프 이미지 분석
+- 주식 캔들 차트 이미지 분석
+- 그래프 영역 수동 지정
+- 캔들 색상 체계 선택
+  - 빨강 = 상승, 파랑 = 하락
+  - 파랑 = 상승, 빨강 = 하락
+  - 자동 추정
+- 분석 신뢰도 점수 제공
+- 스크린리더 친화적인 그래프 설명 생성
+- 값에서 주파수로 변환하는 sonification
+- 시간 흐름을 좌우 스테레오 위치로 표현
+- CSV 데이터 업로드 및 가청화
+- 여러 CSV 데이터의 믹싱 재생
+
+## 현재 코드 구조
+
+### `index.html`
+
+웹 UI의 진입점입니다. 첫 화면은 그래프 이미지 분석을 중심으로 구성되어 있으며, 사용자가 먼저 차트 유형을 선택할 수 있습니다.
+
+현재 UI 흐름은 다음과 같습니다.
+
+1. 차트 유형 선택
+2. 그래프 이미지 업로드
+3. 필요 시 그래프 영역 지정
+4. 그래프 선 또는 캔들 종가 흐름 추출 결과 확인
+5. 접근성 설명 및 신뢰도 확인
+6. 음향 재생
+
+CSV 기능은 개발 및 검증용 보조 기능으로 별도 영역에 유지됩니다.
+
+### `app.js`
+
+프론트엔드 동작을 담당합니다.
+
+- 이미지 업로드 및 캔버스 표시
+- 마우스 드래그 기반 그래프 영역 선택
+- 차트 유형 및 캔들 색상 옵션 전달
+- `/analyze-graph-image` API 호출
+- 추출 결과, 디버그 이미지, 접근성 설명 표시
+- `/sonify-data` API를 통한 음향 생성
+- CSV 업로드, 차트 표시, 단일 재생, 믹싱 재생 처리
+
+### `style.css`
+
+접근성 중심 UI 스타일을 담당합니다.
+
+- 그래프 이미지 분석을 첫 번째 작업으로 배치
+- 차트 유형 선택 및 캔들 분석 안내 영역 제공
+- 분석 결과와 신뢰도 정보 강조
+- 고대비 모드 지원
+- 발표 데모에서 흐름이 잘 보이도록 단계형 UI 구성
+
+### `server.py`
+
+FastAPI 백엔드 진입점입니다.
+
+- `/sonify-data`: 기존 단일 시계열 데이터 가청화 API
+- `/mix-data`: 여러 시계열 데이터 믹싱 API
+- `/analyze-graph-image`: 그래프 이미지 분석 API
+- FastAPI 구조와 기존 `/sonify-data` API는 유지됩니다.
+
+### `engine.py`
+
+음향 생성 엔진과 이미지 분석 로직을 포함합니다.
+
+- `generate_stereo_sound`: 값은 주파수로, 시간은 스테레오 패닝으로 변환합니다.
+- `generate_mixed_sound`: 여러 데이터 시리즈를 합성합니다.
+- `extract_timeseries_from_image`: 선 그래프 또는 캔들 차트 이미지에서 시계열 흐름을 추출합니다.
+- `_extract_candlestick_timeseries`: 캔들 몸통 기반 종가 흐름을 추출합니다.
+- `_red_blue_masks`: 빨강/파랑 계열 캔들 마스크를 생성합니다.
+- `_estimate_price_panel_bounds`: 가격 차트 영역을 추정합니다.
+- `_candles_from_color_columns`: 색상 컬럼 기반 캔들 후보를 보조 추출합니다.
+- `_extract_body_close_from_component`: 캔들 몸통 밀도 기반 종가 위치를 계산합니다.
+- `analyze_timeseries`: 추세, 전환, 최고점, 최저점, 급격한 변화, 변동성을 설명합니다.
+
+### `config.py`
+
+가청화 기본 설정을 담고 있습니다.
+
+- 기본 최소 주파수
+- 전체 재생 시간
+- 샘플레이트
+- 이미지 처리 색상 범위
+
+### `main.py`
+
+현재 저장소에는 `main.py`가 없습니다. 실제 실행 진입점은 `server.py`이고, 프론트엔드는 `index.html`입니다.
+
+## 캔들 차트 지원 조건
+
+현재 캔들 차트 분석은 빨강/파랑 또는 빨강/파랑 계열의 캔들 몸통이 명확하게 보이는 이미지에 최적화되어 있습니다. 거래량 영역, 헤더, 지표선이 많을 경우 그래프 가격 영역만 드래그하여 지정하면 정확도가 높아집니다.
+
+분석 결과가 이상하거나 신뢰도가 낮게 표시되면 다음 방법으로 보정할 수 있습니다.
+
+- 가격 차트 영역만 다시 드래그하여 분석
+- 캔들 색상 설정 변경
+- 거래량 영역과 헤더를 제외한 뒤 재분석
+- 캔들 몸통이 더 선명한 차트 이미지 사용
+
+## 지원 범위와 한계
+
+- 본 시스템은 시계열 그래프 접근성 지원을 목표로 하는 프로토타입입니다.
+- 모든 금융 차트 사이트의 이미지를 완벽히 인식하는 범용 OCR/차트 해석기는 아닙니다.
+- 정확도 향상을 위해 사용자가 가격 차트 영역을 직접 지정할 수 있습니다.
+- 캔들 색상 체계가 다를 경우 색상 설정을 변경해야 합니다.
+- 축 숫자와 실제 가격을 완전 복원하기보다, 그래프 흐름과 특징을 이해할 수 있도록 돕는 데 초점을 둡니다.
+
+## 그래프 분석 설명 예시
+
+- 그래프는 전체적으로 상승 추세를 보입니다.
+- 그래프는 전체적으로 하락 추세를 보입니다.
+- 초반에는 상승하다가 후반에는 하락하는 전환 흐름이 감지됩니다.
+- 최고점은 그래프 후반부에 위치합니다.
+- 최저점은 그래프 초반부에 위치합니다.
+- 중간 지점에서 큰 폭의 하락이 감지되었습니다.
+- 변동성이 큰 데이터입니다.
+- 분석 신뢰도가 낮습니다. 그래프의 가격 영역만 다시 선택하거나 캔들 색상 설정을 변경해 주세요.
+
+## 실행 방법
+
+### 1. 의존성 설치
+
+```bash
+pip install -r requirements.txt
+```
+
+### 2. FastAPI 서버 실행
+
+```bash
+python -m uvicorn server:app --reload
+```
+
+기본 서버 주소는 다음과 같습니다.
+
+```text
+http://127.0.0.1:8000
+```
+
+### 3. 웹 UI 실행
+
+브라우저 보안 정책으로 파일 직접 열기가 불편할 수 있으므로 정적 서버 사용을 권장합니다.
+
+```bash
+python -m http.server 5500
+```
+
+브라우저에서 다음 주소를 엽니다.
+
+```text
+http://127.0.0.1:5500
+```
+
+## 발표 데모 시나리오
+
+### 경제 성장률 그래프
+
+일반 선 그래프 이미지를 업로드하고 전체 상승/하락 추세, 최고점, 최저점, 변동성을 설명과 소리로 확인합니다.
+
+### 주식 가격 그래프
+
+주식 캔들 차트 이미지를 업로드합니다. 결과가 불안정하면 가격 차트 영역만 드래그하고, 캔들 색상 설정을 바꾸어 다시 분석합니다.
+
+### 코로나 확진자 추세 그래프
+
+확진자 수 추세 그래프를 업로드해 중간 구간의 급격한 증가나 감소를 설명으로 확인합니다.
+
+### 기온 변화 그래프
+
+기온 변화 그래프를 업로드해 하루 또는 계절 변화의 흐름을 음향으로 재생합니다.
+
+## 접근성 향상 효과
+
+이 프로젝트는 그래프의 수치만 읽어주는 도구가 아니라, 그래프의 흐름과 특징을 이해하도록 지원하는 접근성 기술입니다. 사용자는 그래프 이미지를 직접 보지 않아도 전체 상승/하락, 전환 지점, 최고점과 최저점의 위치, 변동성 정도를 텍스트와 음향으로 파악할 수 있습니다.
+
+## 향후 개선 방향
+
+- 축과 눈금 OCR을 통한 실제 수치 복원
+- 여러 선 그래프 자동 분리
+- 다양한 금융 차트 색상 체계 지원 확대
+- 캔들 차트의 거래량 영역 자동 분리 정확도 개선
+- 모바일 터치 기반 영역 선택 개선
+- 실제 시각장애인 사용자 테스트 기반 UX 개선
 
 ## Team
+
 Team Name: Pythagoras
 
 - Hwang Soo-young (Team Leader)
@@ -30,8 +209,6 @@ Team Name: Pythagoras
 - Kim Tae-hyun
 
 ## Advisor
+
 Professor Yoo Ju-han  
 Dong-A University
-
-## Repository Purpose
-This repository is used for the "Practical SW Development Project I (Comprehensive Design)" course in the Computer Engineering department at Dong-A University.

@@ -1,383 +1,124 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <title>Project Pythagoras</title>
-    <link rel="stylesheet" href="style.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        /* [추가됨] 로딩 스피너 애니메이션 CSS */
-        .spinner {
-            width: 60px;
-            height: 60px;
-            border: 6px solid #f3f3f3;
-            border-top: 6px solid #ff4757; /* 메인 테마 색상으로 변경 가능 */
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        /* 버튼 비활성화 상태 스타일 */
-        button:disabled, select:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>시각 장애인을 위한 시계열 그래프 표현 기술 개발</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
+  <aside class="sidebar" aria-label="설정">
+    <h1>시각 장애인을 위한 시계열 그래프 표현 기술 개발</h1>
+    <p>시계열 그래프 이미지를 선 데이터로 추출하고 추세를 설명과 소리로 전달합니다.</p>
 
-<div id="loadingOverlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255, 255, 255, 0.85); z-index: 9999; flex-direction: column; justify-content: center; align-items: center; backdrop-filter: blur(4px);">
-    <div class="spinner"></div>
-    <h2 style="margin-top: 25px; color: #2f3542;">⏳ 로딩 중입니다...</h2>
-    <p style="color: #747d8c; font-size: 16px;">(최대 1분 정도 소요될 수 있습니다)</p>
-</div>
+    <section class="control-group">
+      <h2>접근성 설정</h2>
+      <label><input type="checkbox" id="contrastToggle"> 고대비 모드</label>
+    </section>
 
-<div class="sidebar">
-    <h2>Project Pythagoras</h2>
-    <hr>
-    
-    <div>
-        <h4 style="margin-bottom: 10px;">👁️ 접근성 설정</h4>
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-            <input type="checkbox" id="contrastToggle" onchange="toggleHighContrast()">
-            고대비 모드 (흑백)
-        </label>
-    </div>
-    
-    <div>
-        <h4 style="margin-bottom: 10px;">⚙️ 사운드 설정</h4>
-        <div class="caption">최대 주파수 설정 (Hz) <span id="freqVal" style="float: right;">800</span></div>
-        <input type="range" id="freqSlider" min="500" max="5000" step="100" value="800" 
-               oninput="document.getElementById('freqVal').innerText = this.value"
-               onchange="if(globalData.length > 0) renderUI()">
-    </div>
-    <hr>
-    
-    <div class="info-box">
-        💡 본 시스템은 저시력자 및 시각장애인 사용자의 데이터 접근성을 위해 설계되었습니다.
-    </div>
-    <div class="caption" style="margin-top: auto;">© 2026 팀 피타고라스</div>
-</div>
+    <section class="control-group">
+      <h2>음향 설정</h2>
+      <label for="freqSlider">최대 주파수 <span id="freqVal">800</span>Hz</label>
+      <input type="range" id="freqSlider" min="500" max="5000" step="100" value="800">
+      <label for="waveSelect">파형</label>
+      <select id="waveSelect">
+        <option value="sine">부드러운 기본음</option>
+        <option value="triangle">부드러운 삼각파</option>
+        <option value="pulse">명확한 펄스음</option>
+        <option value="square">강한 사각파</option>
+        <option value="sawtooth">강조 톱니파</option>
+      </select>
+    </section>
 
-<div class="main-content">
-    <h1>🎧 멀티모달 가청화 시스템</h1>
-    <hr>
-    <h2>📊 CSV 데이터 변환</h2>
-    
-    <div class="caption" style="margin-bottom: 10px;">CSV 파일을 업로드하세요 (단축키: U)</div>
-    
-    <div class="upload-box" onclick="document.getElementById('csvInput').click()">
-        <svg viewBox="0 0 24 24" width="40" height="40" stroke="#717684" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-        <div style="margin-top: 10px;"><span>Drag and drop file here</span></div>
-        <div class="caption">Limit 200MB per file • CSV</div>
-        <button>Browse files</button>
-    </div>
-    <input type="file" id="csvInput" accept=".csv" style="display: none;">
+    <section class="info-box">
+      <strong>발표 데모 예시</strong>
+      <span>경제 성장률, 주식 가격, 코로나 확진자 추세, 기온 변화 그래프 이미지를 업로드해 바로 분석할 수 있습니다.</span>
+    </section>
+  </aside>
 
-    <canvas id="lineChart" style="max-height: 300px; display: none; margin-bottom: 30px;"></canvas>
-    
-    <hr>
-    <div id="resultsContainer"></div>
+  <main class="main-content">
+    <section class="hero">
+      <p class="eyebrow">Graph Image Accessibility</p>
+      <h2>그래프 이미지를 설명과 소리로 이해하기</h2>
+      <p>이미지 속 선 그래프를 추출하고, 전체 추세와 특징을 스크린리더 친화적인 문장과 스테레오 음향으로 제공합니다.</p>
+    </section>
 
-    <div id="mixPanel" style="display: none; background: #ffe6e6; padding: 20px; border-radius: 12px; margin-top: 30px; border: 1px solid #ffcccc;">
-        <h3 style="margin-top:0;">🎛️ 다중 열 동시 믹싱 재생</h3>
-        <p id="mixListText" style="color: #333;">선택된 데이터: 없음</p>
-        <button class="btn-primary" id="mixBtn" onclick="playMixAudio()">▶️ 다중 믹싱 생성 및 재생 (단축키: M)</button>
-        <audio id="mixAudio" controls style="width: 100%; display: none;"></audio>
-    </div>
-</div>
+    <section class="workflow" aria-label="이미지 분석 흐름">
+      <div>1. 이미지 업로드</div><div>2. 그래프 영역 선택</div><div>3. 선 추출 확인</div><div>4. 설명 확인</div><div>5. 음향 재생</div>
+    </section>
 
-<script>
-    const SERVER_URL = "http://127.0.0.1:8000";
-    let globalData = []; 
-    let globalMixCandidates = []; 
-    let lineChartInstance = null;
-    
-    function toggleHighContrast() {
-        if (document.getElementById('contrastToggle').checked) {
-            document.body.classList.add('high-contrast');
-        } else {
-            document.body.classList.remove('high-contrast');
-        }
-    }
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <h2>그래프 이미지 분석</h2>
+          <p>이미지를 올린 뒤 그래프 영역을 드래그해 선택하세요. 선택하지 않으면 전체 이미지를 분석합니다.</p>
+        </div>
+        <button class="btn-secondary" id="resetSelectionBtn" type="button">영역 초기화</button>
+      </div>
 
-    let voices = [];
-    window.speechSynthesis.onvoiceschanged = () => { voices = window.speechSynthesis.getVoices(); };
 
-    document.getElementById('csvInput').addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        
-        Papa.parse(file, {
-            header: true, dynamicTyping: true, skipEmptyLines: true,
-            complete: function(results) { processCSV(results.data); }
-        });
-        this.value = ''; 
-    });
+      <div class="analysis-options">
+        <label for="chartTypeSelect">차트 유형</label>
+        <select id="chartTypeSelect">
+          <option value="line">일반 선 그래프</option>
+          <option value="candlestick" selected>주식 캔들 차트</option>
+          <option value="csv">CSV 데이터</option>
+        </select>
+        <label for="candleColorSelect" id="candleColorLabel">캔들 색상 설정</label>
+        <select id="candleColorSelect">
+          <option value="red_up_blue_down" selected>빨강 = 상승, 파랑 = 하락</option>
+          <option value="blue_up_red_down">파랑 = 상승, 빨강 = 하락</option>
+          <option value="auto">자동 추정</option>
+        </select>
+      </div>
+      <div id="candleGuide" class="guide-box">
+        현재 캔들 차트 분석은 빨강/파랑 또는 빨강/파랑 계열의 캔들 몸통이 명확하게 보이는 이미지에 최적화되어 있습니다. 거래량 영역, 헤더, 지표선이 많을 경우 그래프 가격 영역만 드래그하여 지정하면 정확도가 높아집니다.
+      </div>
 
-    function processCSV(data) {
-        if (data.length === 0) return alert("데이터가 없습니다.");
-        
-        let cols = Object.keys(data[0]);
-        let numericCols = [];
-        let labels = [];
+      <label class="upload-box" for="imageInput">
+        <strong>그래프 이미지 업로드</strong>
+        <span>PNG, JPG 이미지 지원</span>
+        <input type="file" id="imageInput" accept="image/*">
+      </label>
 
-        const indexKeywords = ['time', 'date', 'index', '시간', '날짜', '기간', 'year', 'month', 'day', 'idx'];
-        let firstCol = cols[0];
-        let isIndexColumn = indexKeywords.some(keyword => firstCol.toLowerCase().includes(keyword));
+      <div class="canvas-wrap" id="canvasWrap" hidden>
+        <canvas id="imageCanvas" aria-label="업로드된 그래프 이미지와 추출된 선 결과"></canvas>
+      </div>
 
-        if (isIndexColumn) {
-            labels = data.map(row => row[firstCol]);
-            cols.shift(); 
-        } else {
-            labels = Array.from({length: data.length}, (_, i) => i + 1);
-        }
+      <div class="button-row">
+        <button class="btn-primary" id="analyzeImageBtn" type="button" disabled>선 추출 및 분석</button>
+        <button class="btn-primary" id="playGraphAudioBtn" type="button" disabled>음향 재생</button>
+        <button class="btn-secondary" id="readDescriptionBtn" type="button" disabled>설명 읽기</button>
+      </div>
 
-        cols.forEach(col => {
-            let colData = data.map(row => row[col]);
-            if (colData.some(val => typeof val === 'number')) {
-                for(let i=0; i<colData.length; i++) {
-                    if (colData[i] === null || isNaN(colData[i])) {
-                        colData[i] = colData[i-1] !== undefined ? colData[i-1] : 0;
-                    }
-                }
-                
-                let min = Math.min(...colData);
-                let max = Math.max(...colData);
-                let scaledData = colData.map(v => max !== min ? (v - min) / (max - min) : 0.5);
-                
-                numericCols.push({ name: col, originalMin: min, originalMax: max, scaledData: scaledData, rawData: colData });
-            }
-        });
+      <div id="imageStatus" class="status" role="status" aria-live="polite">이미지를 업로드하면 분석을 시작할 수 있습니다.</div>
 
-        globalData = numericCols;
-        drawChart(labels, numericCols);
-        renderUI();
-    }
+      <section class="description-box" aria-live="polite">
+        <h3>스크린리더용 그래프 설명</h3>
+        <p id="graphSummary">아직 분석된 그래프가 없습니다.</p>
+        <ul id="descriptionList"></ul>
+      </section>
+      <audio id="graphAudio" controls></audio>
+    </section>
 
-    function drawChart(labels, datasets) {
-        const ctx = document.getElementById('lineChart');
-        ctx.style.display = 'block';
-        
-        if (lineChartInstance) lineChartInstance.destroy();
-        
-        const chartDatasets = datasets.map((d, i) => ({
-            label: d.name,
-            data: d.scaledData, 
-            borderColor: `hsl(${i * 137.5 % 360}, 70%, 50%)`,
-            borderWidth: 2,
-            fill: false,
-            tension: 0.1,
-            pointRadius: 3, 
-            hoverRadius: 6
-        }));
-
-        lineChartInstance = new Chart(ctx, {
-            type: 'line',
-            data: { labels: labels, datasets: chartDatasets },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { 
-                    legend: { display: true, position: 'top', align: 'end', labels: { usePointStyle: true, padding: 20 } },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const datasetIndex = context.datasetIndex;
-                                const dataIndex = context.dataIndex;
-                                const rawValue = datasets[datasetIndex].rawData[dataIndex];
-                                return `${context.dataset.label}: ${rawValue}`;
-                            }
-                        }
-                    }
-                },
-                scales: { x: { grid: { display: false } }, y: { min: 0, max: 1, grid: { color: '#e6e9ef' }, ticks: { display: false } } }
-            }
-        });
-    }
-
-    // [수정됨] renderUI: 초기 로딩 시 모든 오디오 생성이 완료될 때까지 로딩 화면 표시
-    function renderUI() {
-        const container = document.getElementById('resultsContainer');
-        container.innerHTML = '';
-        document.getElementById('mixPanel').style.display = 'block';
-        
-        // 로딩 화면 표시
-        const overlay = document.getElementById('loadingOverlay');
-        overlay.style.display = 'flex';
-
-        let fetchPromises = []; // 모든 API 요청을 담을 배열
-
-        globalData.forEach((colData, index) => {
-            const card = document.createElement('div');
-            card.className = 'data-card';
-            card.innerHTML = `
-                <div>
-                    <h3 style="margin: 0 0 5px 0;">🎵 ${colData.name}</h3>
-                    <div class="caption">원본 최솟값: ${colData.originalMin.toFixed(2)} | 원본 최댓값: ${colData.originalMax.toFixed(2)}</div>
-                </div>
-                <div style="display: flex; gap: 15px; align-items: center;">
-                    <select id="waveSelect_${index}" onchange="handleWaveChange(${index})" style="padding: 6px; border-radius: 6px;">
-                        <option value="sine">기본음 (뚜-)</option>
-                        <option value="triangle">부드러운음 (푸-)</option>
-                        <option value="pulse">명확한음 (칭-)</option>
-                        <option value="square">경고음 (삐-)</option>
-                        <option value="sawtooth">강조음 (브-)</option>
-                    </select>
-                    <label><input type="checkbox" id="mixCheck_${index}" onchange="updateMix()"> 🎛️ 믹싱</label>
-                    
-                    <button class="btn-outline" id="playBtn_${index}" onclick="playAudioOnly(${index})">▶️ 바로 듣기</button>
-                    <button class="btn-outline" id="tts_btn_${index}" onclick="playSingleTTS(${index})">🔊 개별 안내 듣기</button>
-                    <audio id="audio_${index}" controls style="display: none;"></audio>
-                </div>
-            `;
-            container.appendChild(card);
-            
-            // Promise 배열에 추가
-            const initialWave = document.getElementById(`waveSelect_${index}`).value;
-            fetchPromises.push(fetchAudio(index, colData.scaledData, initialWave));
-        });
-        
-        updateMix();
-
-        // [추가됨] 모든 데이터를 백엔드에서 다 받아오면 로딩 화면 끄기
-        Promise.all(fetchPromises).then(() => {
-            overlay.style.display = 'none';
-        }).catch(err => {
-            overlay.style.display = 'none';
-            alert("서버 통신 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
-        });
-    }
-
-    // fetchAudio는 그대로 유지
-    async function fetchAudio(index, dataArray, waveform) {
-        const maxFreq = document.getElementById('freqSlider').value;
-        const payload = { data: dataArray, max_freq: parseFloat(maxFreq), waveform: waveform };
-        try {
-            const res = await fetch(`${SERVER_URL}/sonify-data`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            const blob = await res.blob();
-            document.getElementById(`audio_${index}`).src = URL.createObjectURL(blob);
-        } catch (error) { 
-            console.error("Error:", error); 
-            throw error; // Promise.all 에서 에러를 감지할 수 있도록 던짐
-        }
-    }
-
-    function updateMix() {
-        globalMixCandidates = [];
-        globalData.forEach((colData, index) => {
-            if (document.getElementById(`mixCheck_${index}`).checked) {
-                globalMixCandidates.push({ name: colData.name, data: colData.scaledData, waveform: document.getElementById(`waveSelect_${index}`).value });
-            }
-        });
-        const textEl = document.getElementById('mixListText');
-        textEl.innerHTML = globalMixCandidates.length > 0 ? "<strong>현재 믹싱된 데이터:</strong> " + globalMixCandidates.map(c => c.name).join(', ') : "선택된 데이터: 없음";
-    }
-
-    // [수정됨] 개별 파형 변경 시 일시적으로 버튼 비활성화 (더블 클릭 방지)
-    async function handleWaveChange(index) {
-        updateMix(); 
-        const selectEl = document.getElementById(`waveSelect_${index}`);
-        const playBtn = document.getElementById(`playBtn_${index}`);
-        
-        selectEl.disabled = true;
-        playBtn.innerText = "⏳ 생성 중...";
-        playBtn.disabled = true;
-
-        await fetchAudio(index, globalData[index].scaledData, selectEl.value);
-        
-        selectEl.disabled = false;
-        playBtn.innerText = "▶️ 바로 듣기";
-        playBtn.disabled = false;
-    }
-
-    // [수정됨] 믹싱 버튼 클릭 시 로딩 상태 처리
-    async function playMixAudio() {
-        if (globalMixCandidates.length === 0) return alert("믹싱할 데이터를 1개 이상 체크해주세요.");
-        stopAllAudio();
-        
-        const payload = {
-            data_list: globalMixCandidates.map(c => c.data),
-            max_freq: parseFloat(document.getElementById('freqSlider').value),
-            waveform_list: globalMixCandidates.map(c => c.waveform)
-        };
-        
-        const btn = document.getElementById('mixBtn');
-        btn.innerHTML = "⏳ 다중 믹싱 병합 및 생성 중... (잠시만 기다려주세요)";
-        btn.disabled = true; // 버튼 연타 방지
-
-        try {
-            const res = await fetch(`${SERVER_URL}/mix-data`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            const blob = await res.blob();
-            const mixAudio = document.getElementById('mixAudio');
-            mixAudio.src = URL.createObjectURL(blob);
-            mixAudio.play();
-        } catch (error) {
-            alert("서버 통신 에러가 발생했습니다.");
-        } finally {
-            // 통신이 끝나면 버튼 원상 복구
-            btn.innerHTML = "▶️ 다중 믹싱 생성 및 재생 (단축키: M)";
-            btn.disabled = false;
-        }
-    }
-
-    function playSingleTTS(index) {
-        stopAllAudio();
-        const colData = globalData[index];
-        const text = `${colData.name} 데이터의 최소값은 ${colData.originalMin.toFixed(2)}이고, 최대값은 ${colData.originalMax.toFixed(2)}입니다. 이어서 재생합니다.`;
-        const msg = new SpeechSynthesisUtterance(text);
-        msg.lang = 'ko-KR'; msg.rate = 1.1;
-        const maleVoice = voices.find(v => v.lang.includes('ko') && (v.name.includes('Male') || v.name.includes('남성')));
-        if (maleVoice) msg.voice = maleVoice;
-
-        msg.onend = () => { 
-            const a = document.getElementById(`audio_${index}`);
-            if (a && a.src) a.play(); 
-        };
-        window.speechSynthesis.speak(msg);
-    }
-
-    function stopAllAudio() {
-        window.speechSynthesis.cancel();
-        document.querySelectorAll('audio').forEach(a => { a.pause(); a.currentTime = 0; });
-    }
-
-    function playAudioOnly(index) {
-        stopAllAudio(); 
-        const a = document.getElementById(`audio_${index}`);
-        if (a && a.src) a.play();
-    }
-
-    document.addEventListener('keydown', function(e) {
-        if (e.metaKey || e.ctrlKey || e.altKey) return;
-        const active = document.activeElement;
-        const isTextInput = active && (active.tagName === 'INPUT' && active.type !== 'file' && active.type !== 'checkbox' && active.type !== 'range');
-        if (isTextInput) return;
-
-        const key = e.key.toLowerCase();
-
-        if (key === 'u' || key === 'ㅕ') {
-            e.preventDefault();
-            document.getElementById('csvInput').click();
-        }
-        else if (e.code === 'Space' || key === ' ') {
-            e.preventDefault(); stopAllAudio();
-        }
-        else if (key === 'm' || key === 'ㅡ') {
-            e.preventDefault();
-            const mixBtn = document.getElementById('mixBtn');
-            if (mixBtn && !mixBtn.disabled) mixBtn.click();
-        }
-        else if (!isNaN(parseInt(key)) && parseInt(key) > 0 && parseInt(key) <= 9) {
-            e.preventDefault();
-            const index = parseInt(key) - 1;
-            const btn = document.getElementById(`tts_btn_${index}`);
-            if (btn) btn.click();
-        }
-    });
-</script>
+    <details class="panel helper-panel">
+      <summary>CSV 개발 및 검증용 기능</summary>
+      <p>CSV 데이터는 이미지 추출 결과를 검증하거나 직접 시계열 값을 테스트하기 위한 보조 기능입니다.</p>
+      <label class="upload-box compact" for="csvInput">
+        <strong>CSV 업로드</strong><span>첫 번째 시간 열과 숫자 열을 자동 인식합니다.</span>
+        <input type="file" id="csvInput" accept=".csv">
+      </label>
+      <canvas id="lineChart"></canvas>
+      <div id="csvResults"></div>
+      <div id="mixPanel" class="mix-panel" hidden>
+        <p id="mixListText">선택된 데이터가 없습니다.</p>
+        <button class="btn-primary" id="mixBtn" type="button">선택 데이터 믹싱 재생</button>
+        <audio id="mixAudio" controls></audio>
+      </div>
+    </details>
+  </main>
+  <script src="app.js"></script>
 </body>
 </html>

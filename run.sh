@@ -1,12 +1,18 @@
 #!/bin/bash
+set -e
 
-echo "🚀 FastAPI 서버를 시작합니다..."
-# 1. 백엔드 서버를 백그라운드(&)에서 실행
-uvicorn server:app --reload &
+echo "Starting FastAPI server at http://127.0.0.1:8000"
+python -m uvicorn server:app --host 127.0.0.1 --port 8000 &
+API_PID=$!
 
-# 2. 서버가 뜰 때까지 2초 대기
-sleep 2
+echo "Starting web UI at http://127.0.0.1:5500"
+python -m http.server 5500 --bind 127.0.0.1 &
+WEB_PID=$!
 
-echo "🌐 웹 브라우저를 엽니다..."
-# 3. Mac 기본 브라우저로 HTML 파일 열기 (run -> open)
-open index.html
+cleanup() {
+  kill "$API_PID" "$WEB_PID" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+echo "Open http://127.0.0.1:5500 in your browser. Press Ctrl+C to stop."
+wait

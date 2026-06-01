@@ -34,7 +34,7 @@ def _generate_beeps(data_values):
     t = np.linspace(0, 0.1, beep_length, endpoint=False)
     envelope = np.exp(-t * 20)
     max_beep = np.sin(2 * np.pi * 3000 * t) * envelope * 1.5
-    min_beep = np.sin(2 * np.pi * 500 * t) * envelope * 1.5
+    min_beep = np.sin(2 * np.pi * 100    * t) * envelope * 1.5
 
     for idx in max_edges:
         end_idx = min(idx + beep_length, n)
@@ -78,7 +78,9 @@ def generate_stereo_sound(data_values, user_max_f, waveform_type="sine"):
     if max_val == min_val:
         freqs = np.full(n, min_freq)
     else:
-        freqs = min_freq + (max_freq - min_freq) * ((data_values - min_val) / (max_val - min_val + 1e-9))
+        normalized_data = (data_values - min_val) / (max_val - min_val + 1e-9)
+        # 200Hz ~ 800Hz 구간을 지수형으로 부드럽게 스케일링
+        freqs = min_freq * np.power((max_freq / min_freq), normalized_data)
 
     phases = np.cumsum(freqs) * (2 * np.pi / config.SAMPLE_RATE)
     wave = _wave_from_phase(phases, waveform_type)

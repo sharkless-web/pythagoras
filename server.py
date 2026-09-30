@@ -6,6 +6,7 @@ from typing import List, Optional
 import numpy as np
 import engine
 import config
+from stock_service import StockDataError, fetch_recent_candles
 
 app = FastAPI(title="Project Pythagoras Graph Accessibility API")
 
@@ -35,6 +36,25 @@ def resample_data(data: List[float], target_duration_sec: float, sample_rate: in
     original_indices = np.linspace(0, 1, len(data))
     target_indices = np.linspace(0, 1, target_length)
     return np.interp(target_indices, original_indices, data)
+
+
+@app.get("/stock-candles")
+def stock_candles(symbol: str = "005930", interval: str = "1m", count: int = 30):
+    try:
+        series = fetch_recent_candles(symbol, interval, count)
+        closes = series.close_prices
+        minimum, maximum = min(closes), max(closes)
+        normalized = [(value - minimum) / (maximum - minimum) if maximum != minimum else 0.5 for value in closes]
+        return {
+            "symbol": series.symbol,
+            "interval": series.interval,
+            "source": series.source,
+            "candles": [candle.__dict__ for candle in series.candles],
+            "close_prices": closes,
+            "analysis": engine.analyze_timeseries(normalized),
+        }
+    except (ValueError, StockDataError) as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=422)
 
 
 @app.post("/sonify-data")

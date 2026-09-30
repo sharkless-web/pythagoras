@@ -183,14 +183,16 @@ Linux/macOS 또는 Git Bash 환경에서는 다음 스크립트로 FastAPI 서�
 
 `stock_service.py`는 특정 종목의 최근 캔들 데이터를 시간순으로 가져오고, 기존 `/sonify-data` 요청의 `data` 필드와 `engine.generate_stereo_sound()`가 그대로 받을 수 있는 종가 배열을 제공합니다.
 
-실시간 데이터는 Twelve Data의 `time_series` API를 사용합니다. API 키는 코드에 저장하지 않고 환경변수로 설정합니다.
+실시간 데이터는 토스증권 Open API의 OAuth2와 캔들 API를 사용합니다. 인증정보는 코드에 저장하지 않고 환경변수로 설정합니다.
 
 ```bash
 # Linux/macOS
-export STOCK_API_KEY="발급받은_API_키"
+export TOSSINVEST_CLIENT_ID="발급받은_client_id"
+export TOSSINVEST_CLIENT_SECRET="발급받은_client_secret"
 
 # Windows PowerShell
-$env:STOCK_API_KEY="발급받은_API_키"
+$env:TOSSINVEST_CLIENT_ID="발급받은_client_id"
+$env:TOSSINVEST_CLIENT_SECRET="발급받은_client_secret"
 ```
 
 API 키가 없거나 API 호출에 실패하면 기본적으로 30개 샘플 캔들을 사용하므로, 인증정보 없이도 전체 가청화 연결을 테스트할 수 있습니다. 실시간 호출 실패를 그대로 오류로 처리하려면 `fetch_recent_candles(..., fallback_to_sample=False)`를 사용합니다.
@@ -199,7 +201,7 @@ API 키가 없거나 API 호출에 실패하면 기본적으로 30개 샘플 캔
 import engine
 from stock_service import fetch_recent_candles
 
-series = fetch_recent_candles("AAPL", interval="5min", count=30)
+series = fetch_recent_candles("005930", interval="1m", count=30)
 close_prices = series.close_prices
 
 # 기존 API 요청 본문에 그대로 사용

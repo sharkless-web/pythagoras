@@ -50,6 +50,27 @@
       <div>1. 이미지 업로드</div><div>2. 그래프 영역 선택</div><div>3. 선 추출 확인</div><div>4. 설명 확인</div><div>5. 음향 재생</div>
     </section>
 
+    <section class="panel stock-panel">
+      <div class="section-head">
+        <div><p class="eyebrow">Stock Accessibility MVP</p><h2>주식 차트를 소리로 듣기</h2><p>토스증권에서 최근 종가를 가져와 설명과 스테레오 음향으로 변환합니다.</p></div>
+        <span class="source-badge" id="stockSource">연결 대기</span>
+      </div>
+      <div class="stock-controls">
+        <label for="stockSymbol">종목 코드<input id="stockSymbol" value="005930" autocomplete="off" aria-describedby="stockSymbolHelp"></label>
+        <label for="stockInterval">봉 간격<select id="stockInterval"><option value="1m">1분봉</option><option value="1d">일봉</option></select></label>
+        <label for="stockCount">조회 개수<input id="stockCount" type="number" min="2" max="200" value="30"></label>
+      </div>
+      <p id="stockSymbolHelp" class="field-help">예: 삼성전자 005930, 애플 AAPL</p>
+      <div class="button-row">
+        <button class="btn-primary" id="loadStockBtn" type="button">주식 데이터 불러오기</button>
+        <button class="btn-primary" id="playStockBtn" type="button" disabled>주가 음향 재생</button>
+      </div>
+      <div id="stockStatus" class="status" role="status" aria-live="polite">종목을 입력하고 데이터를 불러오세요.</div>
+      <canvas id="stockChart" aria-label="조회한 주식 종가 차트"></canvas>
+      <div class="description-box"><h3>주가 흐름 설명</h3><p id="stockSummary">아직 조회한 주식 데이터가 없습니다.</p></div>
+      <audio id="stockAudio" controls></audio>
+    </section>
+
     <section class="panel">
       <div class="section-head">
         <div>

@@ -7,10 +7,12 @@ let selectedImageFile = null,
     dragStart = null;
 let extractedGraphData = [],
     extractedPoints = [],
+    stockData = [],
     csvData = [],
     mixCandidates = [],
     chartInstance = null,
-    voices = [];
+    voices = [],
+    stockChartInstance = null;
 
 // DOM 요소
 const canvas = document.getElementById("imageCanvas"),
@@ -36,7 +38,55 @@ document.getElementById("freqSlider").addEventListener("input", e => {
 
 document.getElementById("waveSelect").addEventListener("change", () => {
     if (extractedGraphData.length > 0) prepareGraphAudio();
+    if (stockData.length > 0) prepareStockAudio();
 });
+
+document.getElementById("loadStockBtn").addEventListener("click", loadStockData);
+document.getElementById("playStockBtn").addEventListener("click", () => playAudio("stockAudio"));
+
+async function loadStockData() {
+    const symbol = document.getElementById("stockSymbol").value.trim();
+    const interval = document.getElementById("stockInterval").value;
+    const count = Number(document.getElementById("stockCount").value);
+    const status = document.getElementById("stockStatus");
+    const button = document.getElementById("loadStockBtn");
+    if (!symbol) return;
+    status.innerText = "토스증권에서 주식 데이터를 불러오는 중입니다.";
+    button.disabled = true;
+    try {
+        const params = new URLSearchParams({ symbol, interval, count: String(count) });
+        const response = await fetch(`${SERVER_URL}/stock-candles?${params}`);
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "주식 데이터를 불러오지 못했습니다.");
+        stockData = payload.close_prices || [];
+        document.getElementById("stockSource").innerText = payload.source === "tossinvest" ? "토스증권 실시간 API" : "샘플 데이터";
+        document.getElementById("stockSummary").innerText = payload.analysis?.summary || "흐름 설명이 없습니다.";
+        renderStockChart(payload.candles || [], payload.symbol);
+        await prepareStockAudio();
+        document.getElementById("playStockBtn").disabled = false;
+        status.innerText = `${payload.symbol}의 ${stockData.length}개 종가를 불러왔습니다.`;
+    } catch (error) {
+        document.getElementById("playStockBtn").disabled = true;
+        status.innerText = error.message;
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function renderStockChart(candles, symbol) {
+    if (stockChartInstance) stockChartInstance.destroy();
+    stockChartInstance = new Chart(document.getElementById("stockChart"), {
+        type: "line",
+        data: { labels: candles.map(c => c.timestamp), datasets: [{ label: `${symbol} 종가`, data: candles.map(c => c.close), borderColor: "#176b57", borderWidth: 3, pointRadius: 2, tension: .15 }] },
+        options: { responsive: true, plugins: { legend: { display: true } } }
+    });
+}
+
+async function prepareStockAudio() {
+    if (!stockData.length) return;
+    const blob = await requestAudio(stockData, document.getElementById("waveSelect").value);
+    document.getElementById("stockAudio").src = URL.createObjectURL(blob);
+}
 
 function setStatus(text) {
     document.getElementById("imageStatus").innerText = text;

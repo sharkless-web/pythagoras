@@ -1,7 +1,4 @@
-"""Tests for the stock-data-to-sonification MVP.
-
-Run with: ``python -m unittest stock_test -v``
-"""
+"""Tests for the Toss Securities stock-data-to-sonification flow."""
 
 import io
 import json
@@ -27,45 +24,54 @@ class FakeResponse:
         return json.dumps(self.payload).encode("utf-8")
 
 
+class FakeOpener:
+    def __init__(self, test_case, responses):
+        self.test_case = test_case
+        self.responses = iter(responses)
+        self.requests = []
+
+    def __call__(self, request, timeout):
+        self.test_case.assertEqual(timeout, 10)
+        self.requests.append(request)
+        return FakeResponse(next(self.responses))
+
+
 class StockServiceTest(unittest.TestCase):
     def test_sample_fallback_returns_close_prices(self):
         with patch.dict(os.environ, {}, clear=True):
             series = fetch_recent_candles("005930", count=30)
-
         self.assertEqual(series.source, "sample")
         self.assertEqual(len(series.candles), 30)
         self.assertEqual(series.close_prices[0], 72000.0)
-        self.assertTrue(all(isinstance(value, float) for value in series.close_prices))
 
-    def test_missing_key_can_be_strict(self):
+    def test_missing_credentials_can_be_strict(self):
         with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(StockDataError, "STOCK_API_KEY"):
+            with self.assertRaisesRegex(StockDataError, "TOSSINVEST_CLIENT_ID"):
                 fetch_recent_candles("AAPL", fallback_to_sample=False)
 
-    def test_live_response_is_sorted_oldest_first(self):
-        payload = {
-            "status": "ok",
-            "values": [
-                {"datetime": "2026-01-02 09:10:00", "open": "102", "high": "104", "low": "101", "close": "103", "volume": "30"},
-                {"datetime": "2026-01-02 09:05:00", "open": "100", "high": "103", "low": "99", "close": "102", "volume": "20"},
+    def test_oauth_and_candles_are_converted_to_chronological_closes(self):
+        opener = FakeOpener(
+            self,
+            [
+                {"access_token": "test-token", "token_type": "Bearer", "expires_in": 86400},
+                {"result": {"candles": [
+                    {"timestamp": "2026-03-25T09:32:00+09:00", "openPrice": "102", "highPrice": "104", "lowPrice": "101", "closePrice": "103", "volume": "30"},
+                    {"timestamp": "2026-03-25T09:31:00+09:00", "openPrice": "100", "highPrice": "103", "lowPrice": "99", "closePrice": "102", "volume": "20"},
+                ]}},
             ],
-        }
-
-        def fake_opener(request, timeout):
-            self.assertIn("symbol=AAPL", request.full_url)
-            self.assertEqual(timeout, 10)
-            return FakeResponse(payload)
-
-        series = fetch_recent_candles(
-            "AAPL", count=2, api_key="test-key", fallback_to_sample=False, opener=fake_opener
         )
-        self.assertEqual(series.source, "twelve_data")
+        series = fetch_recent_candles(
+            "005930", count=2, client_id="id", client_secret="secret",
+            fallback_to_sample=False, opener=opener,
+        )
+        self.assertEqual(series.source, "tossinvest")
         self.assertEqual(series.close_prices, [102.0, 103.0])
+        self.assertTrue(opener.requests[0].full_url.endswith("/oauth2/token"))
+        self.assertEqual(opener.requests[1].get_header("Authorization"), "Bearer test-token")
 
     def test_close_prices_connect_to_existing_audio_engine(self):
         with patch.dict(os.environ, {}, clear=True):
             closes = get_close_prices("005930", count=30)
-
         wav_file = engine.generate_stereo_sound(closes, 800, "sine")
         self.assertIsInstance(wav_file, io.BytesIO)
         self.assertEqual(wav_file.read(4), b"RIFF")

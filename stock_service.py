@@ -1,9 +1,4 @@
-"""Fetch recent stock candles and expose their close prices for sonification.
-
-The live implementation uses Twelve Data's ``time_series`` API.  When no API
-key is configured, callers can still exercise the complete sonification flow
-with deterministic sample candles.
-"""
+"""Toss Securities candle data adapter for the existing sonification engine."""
 
 from __future__ import annotations
 
@@ -17,24 +12,12 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-DEFAULT_API_BASE_URL = "https://api.twelvedata.com/time_series"
-SUPPORTED_INTERVALS = {
-    "1min",
-    "5min",
-    "15min",
-    "30min",
-    "45min",
-    "1h",
-    "2h",
-    "4h",
-    "1day",
-    "1week",
-    "1month",
-}
+DEFAULT_API_BASE_URL = "https://openapi.tossinvest.com"
+SUPPORTED_INTERVALS = {"1m", "1d"}
 
 
 class StockDataError(RuntimeError):
-    """Raised when live candle data cannot be fetched or parsed."""
+    """Raised when Toss Securities data cannot be fetched or parsed."""
 
 
 @dataclass(frozen=True)
@@ -56,35 +39,20 @@ class StockSeries:
 
     @property
     def close_prices(self) -> List[float]:
-        """Return the exact list format accepted by ``/sonify-data``."""
         return [candle.close for candle in self.candles]
 
 
 def _sample_candles(symbol: str, interval: str, count: int) -> StockSeries:
-    interval_deltas = {
-        "1min": timedelta(minutes=1),
-        "5min": timedelta(minutes=5),
-        "15min": timedelta(minutes=15),
-        "30min": timedelta(minutes=30),
-        "45min": timedelta(minutes=45),
-        "1h": timedelta(hours=1),
-        "2h": timedelta(hours=2),
-        "4h": timedelta(hours=4),
-        "1day": timedelta(days=1),
-        "1week": timedelta(weeks=1),
-        "1month": timedelta(days=30),
-    }
-    # A repeatable upward trend with small pullbacks makes max/min and direction
-    # easy to verify by ear while still exercising non-monotonic input.
-    pullbacks = [0, 100, -50, 200, 400, 350]
+    step = timedelta(minutes=1) if interval == "1m" else timedelta(days=1)
     start = datetime(2026, 1, 2, 9, 0)
+    pullbacks = [0, 100, -50, 200, 400, 350]
     candles: List[Candle] = []
     for index in range(count):
         close = 72000 + (index // len(pullbacks)) * 450 + pullbacks[index % len(pullbacks)]
         open_price = float(close - (50 if index % 2 == 0 else -50))
         candles.append(
             Candle(
-                timestamp=(start + interval_deltas[interval] * index).isoformat(),
+                timestamp=(start + step * index).isoformat(),
                 open=open_price,
                 high=float(max(open_price, close) + 100),
                 low=float(min(open_price, close) - 100),
@@ -95,92 +63,101 @@ def _sample_candles(symbol: str, interval: str, count: int) -> StockSeries:
     return StockSeries(symbol=symbol, interval=interval, candles=candles, source="sample")
 
 
-def _parse_candles(payload: dict, symbol: str, interval: str, count: int) -> StockSeries:
-    if payload.get("status") == "error" or "values" not in payload:
-        message = payload.get("message", "API response does not contain candle values")
-        raise StockDataError(str(message))
+def _read_json(response) -> dict:
+    try:
+        return json.loads(response.read().decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise StockDataError("Toss Securities returned an invalid JSON response") from exc
 
+
+def _issue_access_token(client_id: str, client_secret: str, base_url: str, opener: Callable) -> str:
+    body = urlencode(
+        {"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret}
+    ).encode("utf-8")
+    request = Request(
+        f"{base_url}/oauth2/token",
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+        method="POST",
+    )
+    with opener(request, timeout=10) as response:
+        payload = _read_json(response)
+    token = payload.get("access_token")
+    if not token:
+        raise StockDataError(payload.get("error_description", "Access token was not returned"))
+    return str(token)
+
+
+def _parse_candles(payload: dict, symbol: str, interval: str, count: int) -> StockSeries:
+    values = payload.get("result", {}).get("candles")
+    if not isinstance(values, list):
+        error = payload.get("error", {})
+        raise StockDataError(error.get("message", "Candle data was not returned"))
     candles: List[Candle] = []
-    for value in payload["values"]:
+    for value in values:
         try:
             volume = value.get("volume")
             candles.append(
                 Candle(
-                    timestamp=str(value["datetime"]),
-                    open=float(value["open"]),
-                    high=float(value["high"]),
-                    low=float(value["low"]),
-                    close=float(value["close"]),
+                    timestamp=str(value["timestamp"]),
+                    open=float(value["openPrice"]),
+                    high=float(value["highPrice"]),
+                    low=float(value["lowPrice"]),
+                    close=float(value["closePrice"]),
                     volume=float(volume) if volume not in (None, "") else None,
                 )
             )
         except (KeyError, TypeError, ValueError) as exc:
-            raise StockDataError(f"Invalid candle in API response: {exc}") from exc
-
+            raise StockDataError(f"Invalid candle in Toss Securities response: {exc}") from exc
     if not candles:
-        raise StockDataError("API returned an empty candle list")
-
-    # Twelve Data returns newest first. ISO-like timestamps sort correctly here.
+        raise StockDataError("Toss Securities returned an empty candle list")
     candles.sort(key=lambda candle: candle.timestamp)
-    return StockSeries(symbol=symbol, interval=interval, candles=candles[-count:], source="twelve_data")
+    return StockSeries(symbol=symbol, interval=interval, candles=candles[-count:], source="tossinvest")
 
 
 def fetch_recent_candles(
     symbol: str,
-    interval: str = "5min",
+    interval: str = "1m",
     count: int = 30,
     *,
-    api_key: Optional[str] = None,
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None,
     fallback_to_sample: bool = True,
     opener: Callable = urlopen,
 ) -> StockSeries:
-    """Fetch chronological candles, using sample data when live access is unavailable.
-
-    ``STOCK_API_KEY`` and optional ``STOCK_API_BASE_URL`` configure live access.
-    Set ``fallback_to_sample=False`` when a live-data failure should be fatal.
-    """
-    symbol = symbol.strip()
-    if not symbol:
-        raise ValueError("symbol must not be empty")
+    """Fetch chronological Toss candles or deterministic sample candles."""
+    symbol = symbol.strip().upper()
+    if not symbol or not all(char.isalnum() or char in ".-" for char in symbol):
+        raise ValueError("symbol must contain only letters, numbers, period, or hyphen")
     if interval not in SUPPORTED_INTERVALS:
         raise ValueError(f"unsupported interval: {interval}")
-    if not 2 <= count <= 5000:
-        raise ValueError("count must be between 2 and 5000")
+    if not 2 <= count <= 200:
+        raise ValueError("count must be between 2 and 200")
 
-    resolved_key = api_key or os.getenv("STOCK_API_KEY")
-    if not resolved_key:
+    resolved_id = client_id or os.getenv("TOSSINVEST_CLIENT_ID")
+    resolved_secret = client_secret or os.getenv("TOSSINVEST_CLIENT_SECRET")
+    if not resolved_id or not resolved_secret:
         if fallback_to_sample:
             return _sample_candles(symbol, interval, count)
-        raise StockDataError("STOCK_API_KEY is not configured")
+        raise StockDataError("TOSSINVEST_CLIENT_ID and TOSSINVEST_CLIENT_SECRET are required")
 
-    base_url = os.getenv("STOCK_API_BASE_URL", DEFAULT_API_BASE_URL)
-    query = urlencode(
-        {
-            "symbol": symbol,
-            "interval": interval,
-            "outputsize": count,
-            "apikey": resolved_key,
-            "format": "JSON",
-        }
-    )
-    request = Request(f"{base_url}?{query}", headers={"Accept": "application/json"})
+    base_url = os.getenv("TOSSINVEST_API_BASE_URL", DEFAULT_API_BASE_URL).rstrip("/")
     try:
+        token = _issue_access_token(resolved_id, resolved_secret, base_url, opener)
+        query = urlencode({"symbol": symbol, "interval": interval, "count": count, "adjusted": "true"})
+        request = Request(
+            f"{base_url}/api/v1/candles?{query}",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        )
         with opener(request, timeout=10) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        return _parse_candles(payload, symbol, interval, count)
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, StockDataError) as exc:
+            return _parse_candles(_read_json(response), symbol, interval, count)
+    except (HTTPError, URLError, TimeoutError, StockDataError) as exc:
         if fallback_to_sample:
             return _sample_candles(symbol, interval, count)
         if isinstance(exc, StockDataError):
             raise
-        raise StockDataError(f"Unable to fetch stock candles: {exc}") from exc
+        raise StockDataError(f"Unable to fetch Toss Securities candles: {exc}") from exc
 
 
-def get_close_prices(
-    symbol: str,
-    interval: str = "5min",
-    count: int = 30,
-    **kwargs,
-) -> List[float]:
-    """Return recent close prices ready for the existing sonification flow."""
+def get_close_prices(symbol: str, interval: str = "1m", count: int = 30, **kwargs) -> List[float]:
     return fetch_recent_candles(symbol, interval, count, **kwargs).close_prices

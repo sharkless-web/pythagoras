@@ -179,6 +179,44 @@ Linux/macOS 또는 Git Bash 환경에서는 다음 스크립트로 FastAPI 서�
 
 현재 실행 구조는 Streamlit이 아니라 `server.py` 기반 FastAPI 백엔드와 `index.html`/`app.js` 기반 웹 프론트엔드입니다.
 
+## 주식 데이터 MVP
+
+`stock_service.py`는 특정 종목의 최근 캔들 데이터를 시간순으로 가져오고, 기존 `/sonify-data` 요청의 `data` 필드와 `engine.generate_stereo_sound()`가 그대로 받을 수 있는 종가 배열을 제공합니다.
+
+실시간 데이터는 Twelve Data의 `time_series` API를 사용합니다. API 키는 코드에 저장하지 않고 환경변수로 설정합니다.
+
+```bash
+# Linux/macOS
+export STOCK_API_KEY="발급받은_API_키"
+
+# Windows PowerShell
+$env:STOCK_API_KEY="발급받은_API_키"
+```
+
+API 키가 없거나 API 호출에 실패하면 기본적으로 30개 샘플 캔들을 사용하므로, 인증정보 없이도 전체 가청화 연결을 테스트할 수 있습니다. 실시간 호출 실패를 그대로 오류로 처리하려면 `fetch_recent_candles(..., fallback_to_sample=False)`를 사용합니다.
+
+```python
+import engine
+from stock_service import fetch_recent_candles
+
+series = fetch_recent_candles("AAPL", interval="5min", count=30)
+close_prices = series.close_prices
+
+# 기존 API 요청 본문에 그대로 사용
+payload = {"data": close_prices, "max_freq": 800, "waveform": "sine"}
+
+# 또는 기존 엔진에 직접 연결
+audio_file = engine.generate_stereo_sound(close_prices, 800, "sine")
+```
+
+테스트 실행:
+
+```bash
+python -m unittest stock_test -v
+```
+
+테스트는 샘플 fallback, API 응답의 시간순 변환, 종가 배열 생성, 기존 WAV 가청화 엔진 연결을 확인합니다. 다음 단계는 종목 검색 UI, 분봉/일봉 선택, 일정 주기의 실시간 갱신 기능입니다.
+
 ## 발표 데모 시나리오
 
 ### 경제 성장률 그래프

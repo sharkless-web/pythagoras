@@ -135,6 +135,17 @@ def _friendly_http_error(error: HTTPError) -> str:
     return f"토스증권 API 요청에 실패했습니다. HTTP 상태 코드 {error.code}."
 
 
+def _friendly_url_error(error: URLError) -> str:
+    reason = error.reason
+    error_number = getattr(reason, "winerror", None) or getattr(reason, "errno", None)
+    if error_number == 10013:
+        return (
+            "Windows가 토스증권 외부 연결을 차단했습니다. "
+            "API 서버를 일반 PowerShell에서 실행하거나 방화벽 정책을 확인하세요."
+        )
+    return "토스증권 서버에 연결할 수 없습니다. 인터넷 연결과 API 서버 실행 권한을 확인하세요."
+
+
 def fetch_recent_candles(
     symbol: str,
     interval: str = "1m",
@@ -176,6 +187,8 @@ def fetch_recent_candles(
             return _sample_candles(symbol, interval, count)
         if isinstance(exc, HTTPError):
             raise StockDataError(_friendly_http_error(exc)) from exc
+        if isinstance(exc, URLError):
+            raise StockDataError(_friendly_url_error(exc)) from exc
         if isinstance(exc, StockDataError):
             raise
         raise StockDataError(f"Unable to fetch Toss Securities candles: {exc}") from exc

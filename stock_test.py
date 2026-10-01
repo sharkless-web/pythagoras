@@ -5,6 +5,7 @@ import json
 import os
 import unittest
 from unittest.mock import patch
+from urllib.error import URLError
 
 import engine
 import server
@@ -91,6 +92,14 @@ class StockServiceTest(unittest.TestCase):
             response = server.stock_candles("005930", "1m", 30, demo=False)
         self.assertEqual(response.status_code, 503)
         self.assertIn(b"live unavailable", response.body)
+
+    def test_windows_socket_denial_has_actionable_message(self):
+        denied = OSError(10013, "socket access forbidden")
+        with patch("stock_service._issue_access_token", side_effect=URLError(denied)):
+            with self.assertRaisesRegex(StockDataError, "Windows.*외부 연결"):
+                fetch_recent_candles(
+                    "005930", client_id="id", client_secret="secret", fallback_to_sample=False
+                )
 
 
 if __name__ == "__main__":

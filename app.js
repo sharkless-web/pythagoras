@@ -89,9 +89,6 @@ const STOCK_SYMBOLS = {
 document.getElementById("loadStockBtn").addEventListener("click", () => loadStockData(false));
 document.getElementById("loadDemoBtn").addEventListener("click", () => loadStockData(true));
 document.getElementById("readStockBtn").addEventListener("click", readStockSummary);
-document.getElementById("candleNavigator").addEventListener("input", updateCandleDetail);
-document.getElementById("previousCandleBtn").addEventListener("click", () => moveCandle(-1));
-document.getElementById("nextCandleBtn").addEventListener("click", () => moveCandle(1));
 
 async function loadStockData(demo = false) {
     const query = document.getElementById("stockSearch").value.trim();
@@ -118,7 +115,6 @@ async function loadStockData(demo = false) {
         stockCandles = payload.candles || [];
         stockVolumes = payload.volumes || stockCandles.map(candle => candle.volume);
         renderStockSummary(payload);
-        configureCandleNavigator();
         document.getElementById("stockResults").hidden = false;
         const source = document.getElementById("stockSource");
         source.innerText = payload.source === "tossinvest" ? "토스증권 실데이터" : "샘플 체험 데이터";
@@ -164,34 +160,6 @@ function renderStockSummary(payload) {
 function formatTimestamp(value) {
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "short" }).format(date);
-}
-
-function configureCandleNavigator() {
-    const navigator = document.getElementById("candleNavigator");
-    navigator.max = String(Math.max(0, stockCandles.length - 1));
-    navigator.value = String(Math.max(0, stockCandles.length - 1));
-    navigator.disabled = stockCandles.length === 0;
-    document.getElementById("previousCandleBtn").disabled = stockCandles.length === 0;
-    document.getElementById("nextCandleBtn").disabled = stockCandles.length === 0;
-    updateCandleDetail();
-}
-
-function moveCandle(offset) {
-    const navigator = document.getElementById("candleNavigator");
-    navigator.value = String(Math.max(0, Math.min(Number(navigator.max), Number(navigator.value) + offset)));
-    navigator.focus();
-    updateCandleDetail();
-}
-
-function updateCandleDetail() {
-    if (!stockCandles.length || !currentStockPayload) return;
-    const index = Number(document.getElementById("candleNavigator").value);
-    const candle = stockCandles[index];
-    const price = value => formatPrice(value, currentStockPayload.currency);
-    const percentage = stockCandles.length > 1 ? Math.round(index / (stockCandles.length - 1) * 100) : 100;
-    const volume = Number.isFinite(Number(candle.volume)) ? `${new Intl.NumberFormat("ko-KR").format(candle.volume)}` : "정보 없음";
-    document.getElementById("candleDetail").innerText = `${index + 1}번째 봉, 전체의 ${percentage}퍼센트, ${formatTimestamp(candle.timestamp)}. 시가 ${price(candle.open)}, 고가 ${price(candle.high)}, 저가 ${price(candle.low)}, 종가 ${price(candle.close)}, 거래량 ${volume}.`;
-    if (activeSeries?.source === "stock") seekToIndex(index, false);
 }
 
 function readStockSummary() {

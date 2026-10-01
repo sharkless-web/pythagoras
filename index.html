@@ -110,16 +110,6 @@
           <h3>한 문장 요약</h3><p id="stockSummary">-</p><p class="timestamp" id="stockTimestamp"></p>
         </div>
         <canvas id="stockChart" aria-label="조회한 주식 종가와 거래량 차트" aria-hidden="true"></canvas>
-        <section class="navigator" aria-labelledby="navigatorHeading">
-          <h3 id="navigatorHeading">봉별 정확한 수치 탐색</h3>
-          <p>탐색 막대에서 방향키를 누르거나 이전·다음 봉 버튼을 사용하세요.</p>
-          <input id="candleNavigator" type="range" min="0" max="0" value="0" step="1" aria-describedby="candleDetail" disabled>
-          <div class="navigator-buttons">
-            <button class="btn-secondary" id="previousCandleBtn" type="button" disabled>이전 봉</button>
-            <button class="btn-secondary" id="nextCandleBtn" type="button" disabled>다음 봉</button>
-          </div>
-          <output id="candleDetail" class="candle-detail" aria-live="polite">조회 후 봉별 정보를 탐색할 수 있습니다.</output>
-        </section>
       </section>
     </section>
 

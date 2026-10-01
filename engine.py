@@ -1,67 +1,11 @@
 import base64
-import io
 from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
-from scipy import signal
-from scipy.io.wavfile import write
 
 import config
 from spatial_audio import generate_spatial_audio
-
-
-def _generate_beeps(data_values):
-    """Create short beeps at local occurrences of the global max and min."""
-    n = len(data_values)
-    beep_signal = np.zeros(n)
-    beep_length = int(0.1 * config.SAMPLE_RATE)
-
-    min_val, max_val = np.min(data_values), np.max(data_values)
-    if max_val == min_val:
-        return beep_signal
-
-    is_max = np.isclose(data_values, max_val, atol=1e-5)
-    is_min = np.isclose(data_values, min_val, atol=1e-5)
-
-    max_edges = np.where(np.diff(is_max.astype(int)) == 1)[0]
-    min_edges = np.where(np.diff(is_min.astype(int)) == 1)[0]
-
-    if len(is_max) > 0 and is_max[0]:
-        max_edges = np.insert(max_edges, 0, 0)
-    if len(is_min) > 0 and is_min[0]:
-        min_edges = np.insert(min_edges, 0, 0)
-
-    t = np.linspace(0, 0.1, beep_length, endpoint=False)
-    envelope = np.exp(-t * 20)
-    max_beep = np.sin(2 * np.pi * 3000 * t) * envelope * 1.5
-    min_beep = np.sin(2 * np.pi * 100    * t) * envelope * 1.5
-
-    for idx in max_edges:
-        end_idx = min(idx + beep_length, n)
-        beep_signal[idx:end_idx] += max_beep[: end_idx - idx]
-
-    for idx in min_edges:
-        end_idx = min(idx + beep_length, n)
-        beep_signal[idx:end_idx] += min_beep[: end_idx - idx]
-
-    return beep_signal
-
-
-def _wave_from_phase(phases, waveform_type):
-    w = str(waveform_type)
-    if "square" in w:
-        return signal.square(phases) * 0.25
-    if "sawtooth" in w:
-        return signal.sawtooth(phases) * 0.3
-    if "triangle" in w:
-        return signal.sawtooth(phases, width=0.5) * 0.5
-    if "pulse" in w:
-        return signal.square(phases, duty=0.2) * 0.3
-    return np.sin(phases) * 0.6
-
-
-# 1. Single-channel sonification engine
 
 def generate_stereo_sound(data_values, user_max_f, waveform_type="sine"):
     """Backward-compatible price-only wrapper around the spatial engine."""
@@ -71,54 +15,6 @@ def generate_stereo_sound(data_values, user_max_f, waveform_type="sine"):
         max_frequency=float(user_max_f),
         waveform_type=waveform_type,
     )
-
-
-# 2. Multi-channel mixing engine
-
-def generate_mixed_sound(data_list, max_freq_list, waveform_list):
-    if not data_list:
-        return None
-
-    pad_len = int(0.1 * config.SAMPLE_RATE)
-    padded_data_list = [np.pad(np.asarray(data, dtype=float), (pad_len, pad_len), mode="edge") for data in data_list]
-
-    n = len(padded_data_list[0])
-    mixed_left = np.zeros(n)
-    mixed_right = np.zeros(n)
-
-    for data, max_f, wave_type in zip(padded_data_list, max_freq_list, waveform_list):
-        min_freq = config.DEFAULT_MIN_FREQ
-        max_freq = float(max_f)
-        min_val, max_val = np.min(data), np.max(data)
-
-        if max_val == min_val:
-            freqs = np.full(n, min_freq)
-        else:
-            freqs = min_freq + (max_freq - min_freq) * ((data - min_val) / (max_val - min_val + 1e-9))
-
-        phases = np.cumsum(freqs) * (2 * np.pi / config.SAMPLE_RATE)
-        wave = _wave_from_phase(phases, wave_type)
-        wave += _generate_beeps(data)
-
-        pan_array = np.linspace(0.0, 1.0, n)
-        mixed_left += wave * np.cos(pan_array * np.pi / 2)
-        mixed_right += wave * np.sin(pan_array * np.pi / 2)
-
-    audio_stereo = np.vstack((mixed_left, mixed_right)).T
-    max_amp = np.max(np.abs(audio_stereo))
-
-    if max_amp > 0:
-        audio_stereo = np.int16((audio_stereo / max_amp) * 32767)
-    else:
-        audio_stereo = np.int16(audio_stereo)
-
-    vf = io.BytesIO()
-    write(vf, config.SAMPLE_RATE, audio_stereo)
-    vf.seek(0)
-    return vf
-
-
-# 3. Graph-image extraction and accessibility analysis
 
 def _crop_image(image: np.ndarray, crop: Optional[Dict[str, int]]) -> Tuple[np.ndarray, Dict[str, int]]:
     h, w = image.shape[:2]

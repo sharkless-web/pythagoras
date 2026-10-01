@@ -3,26 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>피타고라스 — 시계열 그래프 공간음향</title>
+  <title>피타고라스 — 주식 차트 공간음향</title>
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-  <a class="skip-link" href="#csvInput">데이터 업로드로 바로가기</a>
+  <a class="skip-link" href="#stockSearch">종목 검색으로 바로가기</a>
 
   <aside class="sidebar" aria-label="서비스 설정">
     <div>
       <p class="product-kicker">PYTHAGORAS</p>
       <h1>피타고라스</h1>
-      <p>시계열 그래프의 높이, 보조 데이터, 시간을 하나의 공간음향으로 탐색합니다.</p>
+      <p>주가는 음높이로, 거래량은 음량으로, 시간은 좌우 공간 위치로 탐색합니다.</p>
     </div>
 
     <nav aria-label="페이지 영역">
-      <a href="#spatialLab">공간음향 그래프</a>
-      <a href="#stockService">주식 데이터</a>
-      <a href="#playerControls">재생 컨트롤</a>
-      <a href="#supportTools">보조 도구</a>
+      <a href="#stockService">주식 차트 조회</a>
+      <a href="#playerControls">공간음향 재생기</a>
+      <a href="#supportTools">그래프 이미지 분석</a>
     </nav>
 
     <section class="control-group">
@@ -54,68 +52,24 @@
 
     <section class="info-box">
       <strong>키보드 사용법</strong>
-      <span><kbd>Space</kbd> 재생/일시정지, <kbd>Home</kbd> 처음, <kbd>J</kbd>/<kbd>K</kbd> 구간 이동, <kbd>[</kbd>/<kbd>]</kbd> 속도, <kbd>P</kbd> 현재 위치 안내, <kbd>Esc</kbd> 정지</span>
+      <span><kbd>/</kbd> 종목 검색, <kbd>L</kbd> 실시간 조회, <kbd>Space</kbd> 재생/일시정지, <kbd>Home</kbd> 처음, <kbd>J</kbd>/<kbd>K</kbd> 구간 이동, <kbd>[</kbd>/<kbd>]</kbd> 속도, <kbd>P</kbd> 현재 위치 안내, <kbd>Esc</kbd> 정지</span>
     </section>
   </aside>
 
   <main class="main-content" id="mainContent">
     <header class="hero">
-      <p class="eyebrow">Accessible Time-series Sonification</p>
-      <h2>시계열 그래프를<br>공간음향으로 이해하세요</h2>
-      <p>주 그래프의 높이는 음높이로, 거래량 같은 보조 그래프는 음량으로, 시간은 왼쪽에서 오른쪽으로 표현합니다.</p>
+      <p class="eyebrow">Accessible Stock Chart Sonification</p>
+      <h2>주식 차트의 흐름을<br>공간음향으로 이해하세요</h2>
+      <p>종가의 등락, 거래량의 크기, 시간의 방향을 하나의 스테레오 음향으로 결합해 차트를 듣고 탐색합니다.</p>
     </header>
 
-    <ol class="workflow" aria-label="공간음향 생성 순서">
-      <li><span>1</span> 데이터 입력</li><li><span>2</span> 주·보조 열 선택</li><li><span>3</span> 공간음향 생성</li><li><span>4</span> 구간 탐색</li>
+    <ol class="workflow" aria-label="주식 차트 탐색 순서">
+      <li><span>1</span> 종목 조회</li><li><span>2</span> 핵심 수치 확인</li><li><span>3</span> 공간음향 듣기</li><li><span>4</span> 구간 탐색</li>
     </ol>
-
-    <section class="panel spatial-lab" id="spatialLab" aria-labelledby="spatialHeading">
-      <p class="step-label">핵심 기능</p>
-      <h2 id="spatialHeading">시계열 그래프 공간음향</h2>
-      <p>CSV의 주 데이터는 Pitch, 보조 데이터는 Volume, 행의 순서는 좌우 공간 위치로 변환됩니다.</p>
-      <label class="upload-box" for="csvInput"><strong>CSV 데이터 업로드</strong><span><code>timestamp,price,volume</code> 형식을 자동 인식하며 열을 직접 바꿀 수도 있습니다.</span><input type="file" id="csvInput" accept=".csv,text/csv"></label>
-      <div class="button-row"><button class="btn-secondary" id="loadCsvSampleBtn" type="button">내장 샘플 CSV 불러오기</button></div>
-      <div id="csvColumnControls" class="column-controls" hidden>
-        <label for="timeColumnSelect">시간 열<select id="timeColumnSelect"></select></label>
-        <label for="priceColumnSelect">주 데이터 열 (Pitch)<select id="priceColumnSelect"></select></label>
-        <label for="volumeColumnSelect">보조 데이터 열 (Volume)<select id="volumeColumnSelect"></select></label>
-        <button class="btn-primary" id="createCsvSpatialBtn" type="button">공간음향 생성</button>
-      </div>
-      <div id="csvStatus" class="status" role="status" aria-live="polite">CSV를 업로드하거나 내장 샘플을 불러오세요.</div>
-      <canvas id="lineChart" aria-label="업로드한 주 데이터와 보조 데이터 차트" hidden></canvas>
-      <div id="csvResults"></div>
-    </section>
-
-    <section class="panel player-panel" id="playerControls" aria-labelledby="playerHeading">
-      <p class="step-label">공통 재생기</p>
-      <h2 id="playerHeading">키보드로 공간음향 탐색</h2>
-      <p id="activeSeriesLabel">재생할 데이터가 아직 없습니다.</p>
-      <audio id="spatialAudio" preload="metadata" aria-label="시계열 그래프 공간음향"></audio>
-      <div class="transport-controls" role="group" aria-label="공간음향 재생 컨트롤">
-        <button class="btn-primary" id="playPauseBtn" type="button" disabled aria-label="공간음향 재생 또는 일시정지">재생</button>
-        <button class="btn-secondary" id="restartBtn" type="button" disabled>처음부터</button>
-        <button class="btn-secondary" id="previousSegmentBtn" type="button" disabled>이전 구간</button>
-        <button class="btn-secondary" id="nextSegmentBtn" type="button" disabled>다음 구간</button>
-        <button class="btn-secondary" id="slowerBtn" type="button" disabled>속도 감소</button>
-        <button class="btn-secondary" id="fasterBtn" type="button" disabled>속도 증가</button>
-        <button class="btn-secondary" id="announcePositionBtn" type="button" disabled>현재 위치 읽기</button>
-      </div>
-      <div class="playback-state" role="status" aria-live="polite">
-        <strong id="playbackState">정지</strong>
-        <span id="speedState">속도 1배</span>
-        <span id="currentPosition">위치 정보 없음</span>
-      </div>
-      <label for="positionSlider">데이터 위치 탐색</label>
-      <input id="positionSlider" type="range" min="0" max="0" value="0" step="1" disabled aria-describedby="currentPointDetail">
-      <output id="currentPointDetail" class="candle-detail">데이터를 불러오면 현재 값과 보조 값을 확인할 수 있습니다.</output>
-    </section>
 
     <section class="panel stock-panel" id="stockService" aria-labelledby="stockHeading">
       <div class="section-head">
-        <div>
-          <p class="step-label">1단계</p>
-          <h2 id="stockHeading">종목과 조회 기간 선택</h2>
-        </div>
+        <div><p class="step-label">1단계</p><h2 id="stockHeading">종목과 조회 기간 선택</h2></div>
         <span class="source-badge neutral" id="stockSource" role="status">조회 전</span>
       </div>
 
@@ -146,24 +100,19 @@
           <div><p class="step-label">2단계</p><h3 id="summaryHeading"><span id="stockName">종목</span> 핵심 정보</h3></div>
           <button class="btn-secondary" id="readStockBtn" type="button">요약 음성으로 읽기</button>
         </div>
-
         <dl class="metric-grid">
           <div class="metric primary-metric"><dt>최근 종가</dt><dd id="metricLatest">-</dd></div>
           <div class="metric"><dt>조회 구간 변화</dt><dd id="metricChange">-</dd></div>
           <div class="metric"><dt>구간 최고</dt><dd id="metricHigh">-</dd></div>
           <div class="metric"><dt>구간 최저</dt><dd id="metricLow">-</dd></div>
         </dl>
-
         <div class="description-box" aria-live="polite">
-          <h3>한 문장 요약</h3>
-          <p id="stockSummary">-</p>
-          <p class="timestamp" id="stockTimestamp"></p>
+          <h3>한 문장 요약</h3><p id="stockSummary">-</p><p class="timestamp" id="stockTimestamp"></p>
         </div>
-
+        <canvas id="stockChart" aria-label="조회한 주식 종가와 거래량 차트" aria-hidden="true"></canvas>
         <section class="navigator" aria-labelledby="navigatorHeading">
-          <p class="step-label">3단계</p>
-          <h3 id="navigatorHeading">방향키로 시점별 가격 탐색</h3>
-          <p>아래 탐색 막대에 초점을 둔 뒤 왼쪽·오른쪽 방향키를 누르세요.</p>
+          <h3 id="navigatorHeading">봉별 정확한 수치 탐색</h3>
+          <p>탐색 막대에서 방향키를 누르거나 이전·다음 봉 버튼을 사용하세요.</p>
           <input id="candleNavigator" type="range" min="0" max="0" value="0" step="1" aria-describedby="candleDetail" disabled>
           <div class="navigator-buttons">
             <button class="btn-secondary" id="previousCandleBtn" type="button" disabled>이전 봉</button>
@@ -171,23 +120,35 @@
           </div>
           <output id="candleDetail" class="candle-detail" aria-live="polite">조회 후 봉별 정보를 탐색할 수 있습니다.</output>
         </section>
-
-        <canvas id="stockChart" aria-label="조회한 주식 종가 차트" aria-hidden="true"></canvas>
-
-        <section class="sound-card" id="soundGuide" aria-labelledby="soundHeading">
-          <div>
-            <p class="step-label">4단계</p>
-            <h3 id="soundHeading">전체 흐름을 소리로 듣기</h3>
-            <p>종가는 음높이, 거래량은 음량, 시간은 왼쪽에서 오른쪽으로 표현됩니다. 위 공통 재생기에서 구간과 속도를 조절할 수 있습니다.</p>
-          </div>
-          <button class="btn-primary" id="playStockBtn" type="button" disabled>주가 흐름 재생</button>
-        </section>
       </section>
+    </section>
+
+    <section class="panel player-panel" id="playerControls" aria-labelledby="playerHeading">
+      <p class="step-label">3·4단계</p>
+      <h2 id="playerHeading">공간음향 재생과 구간 탐색</h2>
+      <p>가격은 음높이, 거래량은 음량, 시간은 왼쪽에서 오른쪽으로 들립니다.</p>
+      <p id="activeSeriesLabel">먼저 주식 데이터를 조회하세요.</p>
+      <audio id="spatialAudio" preload="metadata" aria-label="주식 차트 공간음향"></audio>
+      <div class="transport-controls" role="group" aria-label="공간음향 재생 컨트롤">
+        <button class="btn-primary" id="playPauseBtn" type="button" disabled aria-label="공간음향 재생 또는 일시정지">재생</button>
+        <button class="btn-secondary" id="restartBtn" type="button" disabled>처음부터</button>
+        <button class="btn-secondary" id="previousSegmentBtn" type="button" disabled>이전 구간</button>
+        <button class="btn-secondary" id="nextSegmentBtn" type="button" disabled>다음 구간</button>
+        <button class="btn-secondary" id="slowerBtn" type="button" disabled>속도 감소</button>
+        <button class="btn-secondary" id="fasterBtn" type="button" disabled>속도 증가</button>
+        <button class="btn-secondary" id="announcePositionBtn" type="button" disabled>현재 위치 읽기</button>
+      </div>
+      <div class="playback-state" role="status" aria-live="polite">
+        <strong id="playbackState">정지</strong><span id="speedState">속도 1배</span><span id="currentPosition">위치 정보 없음</span>
+      </div>
+      <label for="positionSlider">재생 위치 탐색</label>
+      <input id="positionSlider" type="range" min="0" max="0" value="0" step="1" disabled aria-describedby="currentPointDetail">
+      <output id="currentPointDetail" class="candle-detail">주식 데이터를 조회하면 현재 종가와 거래량을 확인할 수 있습니다.</output>
     </section>
 
     <details class="panel helper-panel" id="supportTools">
       <summary>보조 도구: 그래프 이미지 분석</summary>
-      <p>발표 자료나 기사 속 그래프 이미지를 분석할 때 사용합니다.</p>
+      <p>기사나 발표 자료에 포함된 선 그래프 또는 주식 캔들 이미지를 분석합니다.</p>
       <div class="section-head"><h2>그래프 이미지 분석</h2><button class="btn-secondary" id="resetSelectionBtn" type="button">영역 초기화</button></div>
       <div class="analysis-options">
         <label for="chartTypeSelect">차트 유형</label><select id="chartTypeSelect"><option value="line">일반 선 그래프</option><option value="candlestick" selected>주식 캔들 차트</option></select>
@@ -201,12 +162,6 @@
       <section class="description-box" aria-live="polite"><h3>스크린리더용 그래프 설명</h3><p id="graphSummary">아직 분석된 그래프가 없습니다.</p><ul id="descriptionList"></ul></section>
       <section class="debug-wrap" id="debugWrap" hidden><h3>추출 결과 확인</h3><img id="debugImage" alt="이미지에서 추출한 시계열 경로 확인 화면"></section>
       <audio id="graphAudio"></audio>
-    </details>
-
-    <details class="panel helper-panel">
-      <summary>기존 기능: 여러 CSV 열 개별 재생</summary>
-      <p>기존 다중 시계열 실험 기능입니다. 핵심 공간음향 기능은 위의 주 데이터·보조 데이터 결합 재생기를 사용합니다.</p>
-      <div id="mixPanel" class="mix-panel" hidden><p id="mixListText">선택된 데이터가 없습니다.</p><button class="btn-primary" id="mixBtn" type="button">선택 데이터 믹싱 재생</button><audio id="mixAudio" controls></audio></div>
     </details>
   </main>
   <script src="app.js"></script>

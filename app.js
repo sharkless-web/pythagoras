@@ -11,11 +11,6 @@ let extractedGraphData = [],
     stockCandles = [],
     currentStockPayload = null,
     stockVolumes = [],
-    csvData = [],
-    csvRows = [],
-    csvColumns = [],
-    mixCandidates = [],
-    chartInstance = null,
     voices = [],
     stockChartInstance = null;
 
@@ -93,10 +88,6 @@ const STOCK_SYMBOLS = {
 
 document.getElementById("loadStockBtn").addEventListener("click", () => loadStockData(false));
 document.getElementById("loadDemoBtn").addEventListener("click", () => loadStockData(true));
-document.getElementById("playStockBtn").addEventListener("click", async () => {
-    if (currentStockPayload && activeSeries?.source !== "stock") await prepareStockAudio();
-    playPauseActiveAudio();
-});
 document.getElementById("readStockBtn").addEventListener("click", readStockSummary);
 document.getElementById("candleNavigator").addEventListener("input", updateCandleDetail);
 document.getElementById("previousCandleBtn").addEventListener("click", () => moveCandle(-1));
@@ -135,7 +126,6 @@ async function loadStockData(demo = false) {
         document.getElementById("stockSummary").innerText = payload.analysis?.summary || "흐름 설명이 없습니다.";
         renderStockChart(stockCandles, payload.name);
         await prepareStockAudio();
-        document.getElementById("playStockBtn").disabled = false;
         status.innerText = `${payload.name}, ${stockData.length}개 봉을 불러왔습니다. 핵심 정보부터 확인하세요.`;
     } catch (error) {
         currentStockPayload = null;
@@ -143,7 +133,6 @@ async function loadStockData(demo = false) {
         stockCandles = [];
         stockVolumes = [];
         document.getElementById("stockResults").hidden = true;
-        document.getElementById("playStockBtn").disabled = true;
         const source = document.getElementById("stockSource");
         source.innerText = "실데이터 연결 실패";
         source.className = "source-badge error";
@@ -215,8 +204,22 @@ function renderStockChart(candles, name) {
     if (stockChartInstance) stockChartInstance.destroy();
     stockChartInstance = new Chart(document.getElementById("stockChart"), {
         type: "line",
-        data: { labels: candles.map(c => c.timestamp), datasets: [{ label: `${name} 종가`, data: candles.map(c => c.close), borderColor: "#176b57", borderWidth: 3, pointRadius: 2, tension: .15 }] },
-        options: { responsive: true, plugins: { legend: { display: true } } }
+        data: {
+            labels: candles.map(c => c.timestamp),
+            datasets: [
+                { label: `${name} 종가`, data: candles.map(c => c.close), borderColor: "#176b57", borderWidth: 3, pointRadius: 2, tension: .15, yAxisID: "priceAxis" },
+                { type: "bar", label: "거래량", data: candles.map(c => c.volume), backgroundColor: "rgba(109, 58, 168, .24)", borderColor: "#6d3aa8", borderWidth: 1, yAxisID: "volumeAxis" }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: "index", intersect: false },
+            plugins: { legend: { display: true } },
+            scales: {
+                priceAxis: { type: "linear", position: "left", title: { display: true, text: "종가 · Pitch" } },
+                volumeAxis: { type: "linear", position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: "거래량 · Volume" } }
+            }
+        }
     });
 }
 
@@ -701,266 +704,6 @@ function playAudio(id) {
     const a = document.getElementById(id);
     if (a && a.src) a.play();
 }
-
-// ==========================================
-// CSV 개발 및 검증용 기능
-// ==========================================
-document.getElementById("csvInput").addEventListener("change", e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    
-    Papa.parse(file, {
-        header: true,
-        dynamicTyping: true,
-        skipEmptyLines: true,
-        complete: r => processCSV(r.data)
-    });
-});
-
-document.getElementById("loadCsvSampleBtn").addEventListener("click", async () => {
-    const status = document.getElementById("csvStatus");
-    status.innerText = "내장 샘플 CSV를 불러오는 중입니다.";
-    try {
-        const response = await fetch("stock_spatial_sample.csv");
-        if (!response.ok) throw new Error("샘플 CSV를 읽지 못했습니다.");
-        const text = await response.text();
-        Papa.parse(text, {
-            header: true,
-            dynamicTyping: true,
-            skipEmptyLines: true,
-            complete: result => processCSV(result.data)
-        });
-    } catch (error) {
-        status.innerText = error.message;
-    }
-});
-
-function processCSV(rows) {
-    if (!rows.length) return alert("CSV 데이터가 없습니다.");
-    csvRows = rows;
-    csvColumns = Object.keys(rows[0]);
-    const timeKeys = ["timestamp", "time", "date", "index", "year", "시간", "날짜", "시각"];
-    const priceKeys = ["price", "close", "value", "가격", "종가", "주가"];
-    const volumeKeys = ["volume", "vol", "거래량"];
-    const findColumn = keys => csvColumns.find(column => keys.some(key => column.toLowerCase().includes(key)));
-    const numericColumns = csvColumns.filter(column => rows.some(row => Number.isFinite(Number(row[column]))));
-    const timeColumn = findColumn(timeKeys) || "";
-    const priceColumn = findColumn(priceKeys) || numericColumns.find(column => column !== timeColumn) || "";
-    const volumeColumn = findColumn(volumeKeys) || "";
-
-    populateColumnSelect("timeColumnSelect", csvColumns, timeColumn, true, "행 번호 사용");
-    populateColumnSelect("priceColumnSelect", numericColumns, priceColumn, false);
-    populateColumnSelect("volumeColumnSelect", numericColumns, volumeColumn, true, "일정한 음량 사용");
-    document.getElementById("csvColumnControls").hidden = false;
-
-    const labels = rows.map((row, index) => timeColumn ? row[timeColumn] : index + 1);
-    csvData = numericColumns.map(column => {
-        const raw = rows.map(row => Number(row[column])).filter(Number.isFinite);
-        if (!raw.length) return null;
-        const min = Math.min(...raw);
-        const max = Math.max(...raw);
-        const scaled = raw.map(v => max !== min ? (v - min) / (max - min) : .5);
-        return { name: column, raw, scaled, min, max };
-    }).filter(Boolean);
-    drawCsvChart(labels, csvData);
-    renderCsvResults();
-    document.getElementById("csvStatus").innerText = `${rows.length}개 행을 읽었습니다. 주 데이터 ${priceColumn || "미선택"}, 보조 데이터 ${volumeColumn || "사용 안 함"}. 열을 확인한 뒤 공간음향을 생성하세요.`;
-}
-
-function populateColumnSelect(id, columns, selected, allowEmpty = false, emptyLabel = "선택 안 함") {
-    const select = document.getElementById(id);
-    select.innerHTML = "";
-    if (allowEmpty) {
-        const option = document.createElement("option");
-        option.value = "";
-        option.textContent = emptyLabel;
-        select.appendChild(option);
-    }
-    columns.forEach(column => {
-        const option = document.createElement("option");
-        option.value = column;
-        option.textContent = column;
-        option.selected = column === selected;
-        select.appendChild(option);
-    });
-}
-
-function getSelectedCsvSeries() {
-    const timeColumn = document.getElementById("timeColumnSelect").value;
-    const priceColumn = document.getElementById("priceColumnSelect").value;
-    const volumeColumn = document.getElementById("volumeColumnSelect").value;
-    if (!priceColumn) throw new Error("Pitch로 사용할 주 데이터 열을 선택하세요.");
-
-    const aligned = [];
-    csvRows.forEach((row, index) => {
-        const price = Number(row[priceColumn]);
-        const volume = volumeColumn ? Number(row[volumeColumn]) : null;
-        if (!Number.isFinite(price)) return;
-        if (volumeColumn && (!Number.isFinite(volume) || volume < 0)) return;
-        aligned.push({
-            timestamp: timeColumn ? String(row[timeColumn]) : `${index + 1}번째 시점`,
-            price,
-            volume
-        });
-    });
-    if (aligned.length < 2) throw new Error("선택한 열에서 유효한 데이터 두 개 이상을 찾지 못했습니다.");
-    return {
-        label: `${priceColumn}${volumeColumn ? ` + ${volumeColumn}` : ""}`,
-        source: "csv",
-        timestamps: aligned.map(item => item.timestamp),
-        prices: aligned.map(item => item.price),
-        volumes: volumeColumn ? aligned.map(item => item.volume) : null,
-        priceLabel: priceColumn,
-        volumeLabel: volumeColumn || "보조 데이터"
-    };
-}
-
-async function createCsvSpatialAudio() {
-    const status = document.getElementById("csvStatus");
-    try {
-        status.innerText = "공간음향을 생성하는 중입니다.";
-        const series = getSelectedCsvSeries();
-        drawSpatialChart(series);
-        await activateSeries(series);
-        status.innerText = `${series.prices.length}개 시점의 공간음향을 생성했습니다. 공통 재생기에서 들을 수 있습니다.`;
-        document.getElementById("playerControls").scrollIntoView({ behavior: "smooth", block: "start" });
-        document.getElementById("playPauseBtn").focus();
-    } catch (error) {
-        status.innerText = error.message;
-    }
-}
-
-function drawSpatialChart(series) {
-    const element = document.getElementById("lineChart");
-    element.hidden = false;
-    if (chartInstance) chartInstance.destroy();
-    const datasets = [{
-        label: `${series.priceLabel} · Pitch`,
-        data: series.prices,
-        borderColor: "#176b57",
-        backgroundColor: "transparent",
-        borderWidth: 3,
-        pointRadius: 2,
-        tension: .15,
-        yAxisID: "priceAxis"
-    }];
-    if (series.volumes) datasets.push({
-        label: `${series.volumeLabel} · Volume`,
-        data: series.volumes,
-        borderColor: "#8b4db8",
-        backgroundColor: "rgba(139,77,184,.16)",
-        borderWidth: 2,
-        pointRadius: 1,
-        fill: true,
-        yAxisID: "volumeAxis"
-    });
-    chartInstance = new Chart(element, {
-        type: "line",
-        data: { labels: series.timestamps, datasets },
-        options: {
-            responsive: true,
-            interaction: { mode: "index", intersect: false },
-            scales: {
-                priceAxis: { type: "linear", position: "left", title: { display: true, text: "주 데이터 · Pitch" } },
-                volumeAxis: { type: "linear", position: "right", display: Boolean(series.volumes), grid: { drawOnChartArea: false }, title: { display: Boolean(series.volumes), text: "보조 데이터 · Volume" } }
-            }
-        }
-    });
-}
-
-document.getElementById("createCsvSpatialBtn").addEventListener("click", createCsvSpatialAudio);
-
-function drawCsvChart(labels, datasets) {
-    const el = document.getElementById("lineChart");
-    el.hidden = false;
-    if (chartInstance) chartInstance.destroy();
-    
-    chartInstance = new Chart(el, {
-        type: "line",
-        data: {
-            labels,
-            datasets: datasets.map((d, i) => ({
-                label: d.name,
-                data: d.scaled,
-                borderColor: `hsl(${i * 97 % 360}, 72%, 42%)`,
-                borderWidth: 2,
-                pointRadius: 2,
-                tension: .15
-            }))
-        },
-        options: {
-            responsive: true,
-            scales: {
-                y: { min: 0, max: 1, ticks: { display: false } }
-            }
-        }
-    });
-}
-
-function renderCsvResults() {
-    const container = document.getElementById("csvResults");
-    container.innerHTML = "";
-    document.getElementById("mixPanel").hidden = csvData.length === 0;
-    
-    csvData.forEach((d, i) => {
-        const card = document.createElement("article");
-        card.className = "data-card";
-        card.innerHTML = `
-            <div>
-                <h3>${d.name}</h3>
-                <p>원본 최소 ${d.min.toFixed(2)}, 원본 최대 ${d.max.toFixed(2)}</p>
-            </div>
-            <div class="card-actions">
-                <label><input type="checkbox" id="mixCheck_${i}"> 믹싱 포함</label>
-                <button class="btn-secondary" type="button" id="csvPlay_${i}">재생</button>
-                <audio id="csvAudio_${i}" controls></audio>
-            </div>
-        `;
-        container.appendChild(card);
-        
-        document.getElementById(`csvPlay_${i}`).addEventListener("click", async () => {
-            const blob = await requestAudio(d.scaled, "sine");
-            const audio = document.getElementById(`csvAudio_${i}`);
-            audio.src = URL.createObjectURL(blob);
-            playAudio(`csvAudio_${i}`);
-        });
-        
-        document.getElementById(`mixCheck_${i}`).addEventListener("change", updateMixCandidates);
-    });
-    updateMixCandidates();
-}
-
-function updateMixCandidates() {
-    mixCandidates = csvData.filter((_, i) => {
-        const c = document.getElementById(`mixCheck_${i}`);
-        return c && c.checked;
-    });
-    
-    document.getElementById("mixListText").innerText = mixCandidates.length 
-        ? `선택된 데이터: ${mixCandidates.map(i => i.name).join(", ")}` 
-        : "선택된 데이터가 없습니다.";
-}
-
-document.getElementById("mixBtn").addEventListener("click", async () => {
-    if (!mixCandidates.length) return alert("믹싱할 데이터를 선택해 주세요.");
-    
-    const payload = {
-        data_list: mixCandidates.map(i => i.scaled),
-        max_freq: Number(document.getElementById("freqSlider").value),
-        waveform_list: mixCandidates.map(() => "sine")
-    };
-    
-    const res = await fetch(`${SERVER_URL}/mix-data`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-    });
-    
-    const blob = await res.blob();
-    const audio = document.getElementById("mixAudio");
-    audio.src = URL.createObjectURL(blob);
-    playAudio("mixAudio");
-});
 
 // 중앙 Shortcut Map. 입력 요소를 조작하는 동안에는 전역 단축키를 실행하지 않는다.
 document.addEventListener("keydown", e => {

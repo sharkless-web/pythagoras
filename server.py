@@ -38,12 +38,6 @@ class SpatialSoundRequest(BaseModel):
     waveform: str = "sine"
 
 
-class MixRequest(BaseModel):
-    data_list: List[List[float]]
-    max_freq: float
-    waveform_list: List[str]
-
-
 def resample_data(data: List[float], target_duration_sec: float, sample_rate: int) -> np.ndarray:
     target_length = int(target_duration_sec * sample_rate)
     original_indices = np.linspace(0, 1, len(data))
@@ -151,14 +145,6 @@ async def sonify_spatial(req: SpatialSoundRequest):
         )
     except ValueError as exc:
         return JSONResponse({"detail": str(exc)}, status_code=422)
-
-
-@app.post("/mix-data")
-async def mix_data(req: MixRequest):
-    resampled_data_list = [resample_data(d, config.TOTAL_PLAY_TIME, config.SAMPLE_RATE) for d in req.data_list]
-    max_freq_list = [req.max_freq] * len(resampled_data_list)
-    audio_vf = engine.generate_mixed_sound(resampled_data_list, max_freq_list, req.waveform_list)
-    return StreamingResponse(audio_vf, media_type="audio/wav")
 
 
 @app.post("/analyze-graph-image")

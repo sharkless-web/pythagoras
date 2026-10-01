@@ -3,16 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>시각 장애인을 위한 시계열 그래프 표현 기술 개발</title>
+  <title>소리주식 — 접근 가능한 주가 탐색</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-  
-  <aside class="sidebar" aria-label="설정">
-    <h1>시각 장애인을 위한 시계열 그래프 표현 기술 개발</h1>
-    <p>시계열 그래프 이미지를 선 데이터로 추출하고 추세를 설명과 소리로 전달합니다.</p>
+  <a class="skip-link" href="#stockSearch">종목 검색으로 바로가기</a>
+
+  <aside class="sidebar" aria-label="서비스 설정">
+    <div>
+      <p class="product-kicker">PYTHAGORAS</p>
+      <h1>소리주식</h1>
+      <p>주가의 숫자는 정확히 읽고, 시간에 따른 흐름은 소리로 탐색합니다.</p>
+    </div>
+
+    <nav aria-label="페이지 영역">
+      <a href="#stockService">주식 탐색</a>
+      <a href="#soundGuide">소리 사용법</a>
+      <a href="#supportTools">보조 도구</a>
+    </nav>
 
     <section class="control-group">
       <h2>접근성 설정</h2>
@@ -21,9 +31,9 @@
 
     <section class="control-group">
       <h2>음향 설정</h2>
-      <label for="freqSlider">최대 주파수 <span id="freqVal">800</span>Hz</label>
+      <label for="freqSlider">최대 음높이 <span id="freqVal">800</span>Hz</label>
       <input type="range" id="freqSlider" min="500" max="5000" step="100" value="800">
-      <label for="waveSelect">파형</label>
+      <label for="waveSelect">소리 종류</label>
       <select id="waveSelect">
         <option value="sine">부드러운 기본음</option>
         <option value="triangle">부드러운 삼각파</option>
@@ -34,110 +44,121 @@
     </section>
 
     <section class="info-box">
-      <strong>발표 데모 예시</strong>
-      <span>경제 성장률, 주식 가격, 코로나 확진자 추세, 기온 변화 그래프 이미지를 업로드해 바로 분석할 수 있습니다.</span>
+      <strong>키보드 사용법</strong>
+      <span><kbd>/</kbd> 종목 검색, <kbd>L</kbd> 조회, <kbd>←</kbd><kbd>→</kbd> 봉 이동, <kbd>Esc</kbd> 소리 정지</span>
     </section>
   </aside>
 
-  <main class="main-content">
-    <section class="hero">
-      <p class="eyebrow">Graph Image Accessibility</p>
-      <h2>그래프 이미지를 설명과 소리로 이해하기</h2>
-      <p>이미지 속 선 그래프를 추출하고, 전체 추세와 특징을 스크린리더 친화적인 문장과 스테레오 음향으로 제공합니다.</p>
-    </section>
+  <main class="main-content" id="mainContent">
+    <header class="hero">
+      <p class="eyebrow">Accessible Stock Explorer</p>
+      <h2>차트를 보지 않아도<br>주가의 흐름을 파악하세요</h2>
+      <p>먼저 핵심 숫자를 확인하고, 방향키로 각 시점의 가격을 살펴본 뒤, 전체 흐름을 소리로 들을 수 있습니다.</p>
+    </header>
 
-    <section class="workflow" aria-label="이미지 분석 흐름">
-      <div>1. 이미지 업로드</div><div>2. 그래프 영역 선택</div><div>3. 선 추출 확인</div><div>4. 설명 확인</div><div>5. 음향 재생</div>
-    </section>
+    <ol class="workflow" aria-label="주식 탐색 순서">
+      <li><span>1</span> 종목 검색</li><li><span>2</span> 핵심 수치 확인</li><li><span>3</span> 봉별 탐색</li><li><span>4</span> 흐름 듣기</li>
+    </ol>
 
-    <section class="panel stock-panel">
-      <div class="section-head">
-        <div><p class="eyebrow">Stock Accessibility MVP</p><h2>주식 차트를 소리로 듣기</h2><p>토스증권에서 최근 종가를 가져와 설명과 스테레오 음향으로 변환합니다.</p></div>
-        <span class="source-badge" id="stockSource">연결 대기</span>
-      </div>
-      <div class="stock-controls">
-        <label for="stockSymbol">종목 코드<input id="stockSymbol" value="005930" autocomplete="off" aria-describedby="stockSymbolHelp"></label>
-        <label for="stockInterval">봉 간격<select id="stockInterval"><option value="1m">1분봉</option><option value="1d">일봉</option></select></label>
-        <label for="stockCount">조회 개수<input id="stockCount" type="number" min="2" max="200" value="30"></label>
-      </div>
-      <p id="stockSymbolHelp" class="field-help">예: 삼성전자 005930, 애플 AAPL</p>
-      <div class="button-row">
-        <button class="btn-primary" id="loadStockBtn" type="button">주식 데이터 불러오기</button>
-        <button class="btn-primary" id="playStockBtn" type="button" disabled>주가 음향 재생</button>
-      </div>
-      <div id="stockStatus" class="status" role="status" aria-live="polite">종목을 입력하고 데이터를 불러오세요.</div>
-      <canvas id="stockChart" aria-label="조회한 주식 종가 차트"></canvas>
-      <div class="description-box"><h3>주가 흐름 설명</h3><p id="stockSummary">아직 조회한 주식 데이터가 없습니다.</p></div>
-      <audio id="stockAudio" controls></audio>
-    </section>
-
-    <section class="panel">
+    <section class="panel stock-panel" id="stockService" aria-labelledby="stockHeading">
       <div class="section-head">
         <div>
-          <h2>그래프 이미지 분석</h2>
-          <p>이미지를 올린 뒤 그래프 영역을 드래그해 선택하세요. 선택하지 않으면 전체 이미지를 분석합니다.</p>
+          <p class="step-label">1단계</p>
+          <h2 id="stockHeading">종목과 조회 기간 선택</h2>
         </div>
-        <button class="btn-secondary" id="resetSelectionBtn" type="button">영역 초기화</button>
+        <span class="source-badge neutral" id="stockSource" role="status">조회 전</span>
       </div>
 
-
-      <div class="analysis-options">
-        <label for="chartTypeSelect">차트 유형</label>
-        <select id="chartTypeSelect">
-          <option value="line">일반 선 그래프</option>
-          <option value="candlestick" selected>주식 캔들 차트</option>
-        </select>
-        <label for="candleColorSelect" id="candleColorLabel">캔들 색상 설정</label>
-        <select id="candleColorSelect">
-          <option value="red_up_blue_down" selected>빨강 = 상승, 파랑 = 하락</option>
-          <option value="blue_up_red_down">파랑 = 상승, 빨강 = 하락</option>
-          <option value="auto">자동 추정</option>
-        </select>
+      <div class="stock-controls">
+        <label for="stockSearch">종목명 또는 종목 코드
+          <input id="stockSearch" list="stockSuggestions" value="삼성전자" autocomplete="off" aria-describedby="stockSymbolHelp">
+          <datalist id="stockSuggestions">
+            <option value="삼성전자"><option value="SK하이닉스"><option value="NAVER"><option value="카카오">
+            <option value="애플"><option value="마이크로소프트"><option value="엔비디아"><option value="테슬라">
+          </datalist>
+        </label>
+        <label for="stockInterval">봉 간격
+          <select id="stockInterval"><option value="1m">1분봉</option><option value="1d">일봉</option></select>
+        </label>
+        <label for="stockCount">조회 개수
+          <select id="stockCount"><option value="30">30개</option><option value="60">60개</option><option value="120">120개</option><option value="200">200개</option></select>
+        </label>
       </div>
-      <div id="candleGuide" class="guide-box">
-        현재 캔들 차트 분석은 빨강/파랑 또는 빨강/파랑 계열의 캔들 몸통이 명확하게 보이는 이미지에 최적화되어 있습니다. 거래량 영역, 헤더, 지표선이 많을 경우 그래프 가격 영역만 드래그하여 지정하면 정확도가 높아집니다.
-      </div>
-
-      <label class="upload-box" for="imageInput">
-        <strong>그래프 이미지 업로드</strong>
-        <span>PNG, JPG 이미지 지원</span>
-        <input type="file" id="imageInput" accept="image/*">
-      </label>
-
-      <div class="canvas-wrap" id="canvasWrap" hidden>
-        <canvas id="imageCanvas" aria-label="업로드된 그래프 이미지와 추출된 선 결과"></canvas>
-      </div>
-
+      <p id="stockSymbolHelp" class="field-help">종목명과 코드 모두 사용할 수 있습니다. 예: 삼성전자, 005930, 애플, AAPL</p>
       <div class="button-row">
-        <button class="btn-primary" id="analyzeImageBtn" type="button" disabled>선 추출 및 분석</button>
-        <button class="btn-primary" id="playGraphAudioBtn" type="button" disabled>음향 재생</button>
-        <button class="btn-secondary" id="readDescriptionBtn" type="button" disabled>설명 읽기</button>
+        <button class="btn-primary" id="loadStockBtn" type="button">실시간 데이터 조회</button>
+        <button class="btn-secondary" id="loadDemoBtn" type="button">샘플로 체험</button>
       </div>
+      <div id="stockStatus" class="status" role="status" aria-live="polite">종목을 선택한 뒤 실시간 데이터를 조회하세요.</div>
 
-      <div id="imageStatus" class="status" role="status" aria-live="polite">이미지를 업로드하면 분석을 시작할 수 있습니다.</div>
+      <section id="stockResults" hidden aria-labelledby="summaryHeading">
+        <div class="result-heading">
+          <div><p class="step-label">2단계</p><h3 id="summaryHeading"><span id="stockName">종목</span> 핵심 정보</h3></div>
+          <button class="btn-secondary" id="readStockBtn" type="button">요약 음성으로 읽기</button>
+        </div>
 
-      <section class="description-box" aria-live="polite">
-        <h3>스크린리더용 그래프 설명</h3>
-        <p id="graphSummary">아직 분석된 그래프가 없습니다.</p>
-        <ul id="descriptionList"></ul>
+        <dl class="metric-grid">
+          <div class="metric primary-metric"><dt>최근 종가</dt><dd id="metricLatest">-</dd></div>
+          <div class="metric"><dt>조회 구간 변화</dt><dd id="metricChange">-</dd></div>
+          <div class="metric"><dt>구간 최고</dt><dd id="metricHigh">-</dd></div>
+          <div class="metric"><dt>구간 최저</dt><dd id="metricLow">-</dd></div>
+        </dl>
+
+        <div class="description-box" aria-live="polite">
+          <h3>한 문장 요약</h3>
+          <p id="stockSummary">-</p>
+          <p class="timestamp" id="stockTimestamp"></p>
+        </div>
+
+        <section class="navigator" aria-labelledby="navigatorHeading">
+          <p class="step-label">3단계</p>
+          <h3 id="navigatorHeading">방향키로 시점별 가격 탐색</h3>
+          <p>아래 탐색 막대에 초점을 둔 뒤 왼쪽·오른쪽 방향키를 누르세요.</p>
+          <input id="candleNavigator" type="range" min="0" max="0" value="0" step="1" aria-describedby="candleDetail" disabled>
+          <div class="navigator-buttons">
+            <button class="btn-secondary" id="previousCandleBtn" type="button" disabled>이전 봉</button>
+            <button class="btn-secondary" id="nextCandleBtn" type="button" disabled>다음 봉</button>
+          </div>
+          <output id="candleDetail" class="candle-detail" aria-live="polite">조회 후 봉별 정보를 탐색할 수 있습니다.</output>
+        </section>
+
+        <canvas id="stockChart" aria-label="조회한 주식 종가 차트" aria-hidden="true"></canvas>
+
+        <section class="sound-card" id="soundGuide" aria-labelledby="soundHeading">
+          <div>
+            <p class="step-label">4단계</p>
+            <h3 id="soundHeading">전체 흐름을 소리로 듣기</h3>
+            <p>가격이 높을수록 음이 높아지고, 시간은 왼쪽에서 오른쪽으로 이동합니다. 최고점과 최저점에서는 짧은 알림음이 납니다.</p>
+          </div>
+          <button class="btn-primary" id="playStockBtn" type="button" disabled>주가 흐름 재생</button>
+          <audio id="stockAudio" controls aria-label="주가 흐름 가청화 오디오"></audio>
+        </section>
       </section>
-      <audio id="graphAudio"></audio>
     </section>
 
-    <details class="panel helper-panel">
-      <summary>CSV 개발 및 검증용 기능</summary>
-      <p>CSV 데이터는 이미지 추출 결과를 검증하거나 직접 시계열 값을 테스트하기 위한 보조 기능입니다.</p>
-      <label class="upload-box compact" for="csvInput">
-        <strong>CSV 업로드</strong><span>첫 번째 시간 열과 숫자 열을 자동 인식합니다.</span>
-        <input type="file" id="csvInput" accept=".csv">
-      </label>
-      <canvas id="lineChart"></canvas>
-      <div id="csvResults"></div>
-      <div id="mixPanel" class="mix-panel" hidden>
-        <p id="mixListText">선택된 데이터가 없습니다.</p>
-        <button class="btn-primary" id="mixBtn" type="button">선택 데이터 믹싱 재생</button>
-        <audio id="mixAudio" controls></audio>
+    <details class="panel helper-panel" id="supportTools">
+      <summary>보조 도구: 그래프 이미지 분석</summary>
+      <p>발표 자료나 기사 속 그래프 이미지를 분석할 때 사용합니다.</p>
+      <div class="section-head"><h2>그래프 이미지 분석</h2><button class="btn-secondary" id="resetSelectionBtn" type="button">영역 초기화</button></div>
+      <div class="analysis-options">
+        <label for="chartTypeSelect">차트 유형</label><select id="chartTypeSelect"><option value="line">일반 선 그래프</option><option value="candlestick" selected>주식 캔들 차트</option></select>
+        <label for="candleColorSelect" id="candleColorLabel">캔들 색상 설정</label><select id="candleColorSelect"><option value="red_up_blue_down" selected>빨강 = 상승, 파랑 = 하락</option><option value="blue_up_red_down">파랑 = 상승, 빨강 = 하락</option><option value="auto">자동 추정</option></select>
       </div>
+      <div id="candleGuide" class="guide-box">가격 차트 영역만 선택하면 캔들 종가 추출 정확도가 높아집니다.</div>
+      <label class="upload-box" for="imageInput"><strong>그래프 이미지 업로드</strong><span>PNG, JPG 이미지 지원</span><input type="file" id="imageInput" accept="image/*"></label>
+      <div class="canvas-wrap" id="canvasWrap" hidden><canvas id="imageCanvas" aria-label="업로드된 그래프 이미지와 추출된 선 결과"></canvas></div>
+      <div class="button-row"><button class="btn-primary" id="analyzeImageBtn" type="button" disabled>선 추출 및 분석</button><button class="btn-primary" id="playGraphAudioBtn" type="button" disabled>음향 재생</button><button class="btn-secondary" id="readDescriptionBtn" type="button" disabled>설명 읽기</button></div>
+      <div id="imageStatus" class="status" role="status" aria-live="polite">이미지를 업로드하면 분석을 시작할 수 있습니다.</div>
+      <section class="description-box" aria-live="polite"><h3>스크린리더용 그래프 설명</h3><p id="graphSummary">아직 분석된 그래프가 없습니다.</p><ul id="descriptionList"></ul></section>
+      <audio id="graphAudio"></audio>
+    </details>
+
+    <details class="panel helper-panel">
+      <summary>개발 도구: CSV 가청화</summary>
+      <p>직접 시계열 값을 시험하기 위한 개발용 기능입니다.</p>
+      <label class="upload-box compact" for="csvInput"><strong>CSV 업로드</strong><span>첫 번째 시간 열과 숫자 열을 자동 인식합니다.</span><input type="file" id="csvInput" accept=".csv"></label>
+      <canvas id="lineChart"></canvas><div id="csvResults"></div>
+      <div id="mixPanel" class="mix-panel" hidden><p id="mixListText">선택된 데이터가 없습니다.</p><button class="btn-primary" id="mixBtn" type="button">선택 데이터 믹싱 재생</button><audio id="mixAudio" controls></audio></div>
     </details>
   </main>
   <script src="app.js"></script>

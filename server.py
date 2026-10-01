@@ -6,7 +6,7 @@ from typing import List, Optional
 import numpy as np
 import engine
 import config
-from stock_service import StockDataError, fetch_recent_candles
+from stock_service import StockDataError, fetch_recent_candles, get_sample_candles
 
 app = FastAPI(title="Project Pythagoras Graph Accessibility API")
 
@@ -38,23 +38,64 @@ def resample_data(data: List[float], target_duration_sec: float, sample_rate: in
     return np.interp(target_indices, original_indices, data)
 
 
+STOCK_NAMES = {
+    "005930": ("삼성전자", "KRW"),
+    "000660": ("SK하이닉스", "KRW"),
+    "035420": ("NAVER", "KRW"),
+    "035720": ("카카오", "KRW"),
+    "051910": ("LG화학", "KRW"),
+    "AAPL": ("애플", "USD"),
+    "MSFT": ("마이크로소프트", "USD"),
+    "NVDA": ("엔비디아", "USD"),
+    "TSLA": ("테슬라", "USD"),
+}
+
+
+@app.get("/stock-search")
+def stock_search(q: str = ""):
+    query = q.strip().lower()
+    matches = [
+        {"symbol": symbol, "name": name, "currency": currency}
+        for symbol, (name, currency) in STOCK_NAMES.items()
+        if not query or query in symbol.lower() or query in name.lower()
+    ]
+    return {"results": matches[:10]}
+
+
 @app.get("/stock-candles")
-def stock_candles(symbol: str = "005930", interval: str = "1m", count: int = 30):
+def stock_candles(symbol: str = "005930", interval: str = "1m", count: int = 30, demo: bool = False):
     try:
-        series = fetch_recent_candles(symbol, interval, count)
+        series = get_sample_candles(symbol, interval, count) if demo else fetch_recent_candles(
+            symbol, interval, count, fallback_to_sample=False
+        )
         closes = series.close_prices
         minimum, maximum = min(closes), max(closes)
         normalized = [(value - minimum) / (maximum - minimum) if maximum != minimum else 0.5 for value in closes]
+        first, latest = closes[0], closes[-1]
+        change = latest - first
+        change_percent = (change / first * 100.0) if first else 0.0
+        name, default_currency = STOCK_NAMES.get(series.symbol, (series.symbol, "KRW"))
+        candle_currency = default_currency
         return {
             "symbol": series.symbol,
+            "name": name,
+            "currency": candle_currency,
             "interval": series.interval,
             "source": series.source,
             "candles": [candle.__dict__ for candle in series.candles],
             "close_prices": closes,
+            "metrics": {
+                "latest": latest,
+                "change": change,
+                "change_percent": change_percent,
+                "high": maximum,
+                "low": minimum,
+                "latest_timestamp": series.candles[-1].timestamp,
+            },
             "analysis": engine.analyze_timeseries(normalized),
         }
     except (ValueError, StockDataError) as exc:
-        return JSONResponse({"detail": str(exc)}, status_code=422)
+        return JSONResponse({"detail": str(exc)}, status_code=503)
 
 
 @app.post("/sonify-data")

@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import engine
+import server
 from stock_service import StockDataError, fetch_recent_candles, get_close_prices
 
 
@@ -75,6 +76,19 @@ class StockServiceTest(unittest.TestCase):
         wav_file = engine.generate_stereo_sound(closes, 800, "sine")
         self.assertIsInstance(wav_file, io.BytesIO)
         self.assertEqual(wav_file.read(4), b"RIFF")
+
+    def test_demo_endpoint_is_explicit_and_includes_accessible_metrics(self):
+        payload = server.stock_candles("005930", "1m", 30, demo=True)
+        self.assertEqual(payload["source"], "sample")
+        self.assertEqual(payload["name"], "삼성전자")
+        self.assertIn("latest", payload["metrics"])
+        self.assertIn("change_percent", payload["metrics"])
+
+    def test_live_endpoint_does_not_hide_failure_with_sample_data(self):
+        with patch("server.fetch_recent_candles", side_effect=StockDataError("live unavailable")):
+            response = server.stock_candles("005930", "1m", 30, demo=False)
+        self.assertEqual(response.status_code, 503)
+        self.assertIn(b"live unavailable", response.body)
 
 
 if __name__ == "__main__":

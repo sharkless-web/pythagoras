@@ -63,6 +63,16 @@ def _sample_candles(symbol: str, interval: str, count: int) -> StockSeries:
     return StockSeries(symbol=symbol, interval=interval, candles=candles, source="sample")
 
 
+def get_sample_candles(symbol: str, interval: str = "1m", count: int = 30) -> StockSeries:
+    """Return deterministic demo data without attempting a live API call."""
+    symbol = symbol.strip().upper()
+    if interval not in SUPPORTED_INTERVALS:
+        raise ValueError(f"unsupported interval: {interval}")
+    if not 2 <= count <= 200:
+        raise ValueError("count must be between 2 and 200")
+    return _sample_candles(symbol, interval, count)
+
+
 def _read_json(response) -> dict:
     try:
         return json.loads(response.read().decode("utf-8"))
@@ -115,6 +125,16 @@ def _parse_candles(payload: dict, symbol: str, interval: str, count: int) -> Sto
     return StockSeries(symbol=symbol, interval=interval, candles=candles[-count:], source="tossinvest")
 
 
+def _friendly_http_error(error: HTTPError) -> str:
+    if error.code == 401:
+        return "토스증권 인증정보가 올바르지 않습니다. Client ID와 Secret을 확인하세요."
+    if error.code == 403:
+        return "토스증권이 현재 접속 IP를 허용하지 않았습니다. Open API 허용 IP 설정을 확인하세요."
+    if error.code == 429:
+        return "토스증권 API 요청 한도를 초과했습니다. 잠시 후 다시 시도하세요."
+    return f"토스증권 API 요청에 실패했습니다. HTTP 상태 코드 {error.code}."
+
+
 def fetch_recent_candles(
     symbol: str,
     interval: str = "1m",
@@ -154,6 +174,8 @@ def fetch_recent_candles(
     except (HTTPError, URLError, TimeoutError, StockDataError) as exc:
         if fallback_to_sample:
             return _sample_candles(symbol, interval, count)
+        if isinstance(exc, HTTPError):
+            raise StockDataError(_friendly_http_error(exc)) from exc
         if isinstance(exc, StockDataError):
             raise
         raise StockDataError(f"Unable to fetch Toss Securities candles: {exc}") from exc

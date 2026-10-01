@@ -8,6 +8,8 @@ let selectedImageFile = null,
 let extractedGraphData = [],
     extractedPoints = [],
     stockData = [],
+    stockCandles = [],
+    currentStockPayload = null,
     csvData = [],
     mixCandidates = [],
     chartInstance = null,
@@ -41,43 +43,141 @@ document.getElementById("waveSelect").addEventListener("change", () => {
     if (stockData.length > 0) prepareStockAudio();
 });
 
-document.getElementById("loadStockBtn").addEventListener("click", loadStockData);
-document.getElementById("playStockBtn").addEventListener("click", () => playAudio("stockAudio"));
+const STOCK_SYMBOLS = {
+    "삼성전자": "005930", "005930": "005930",
+    "sk하이닉스": "000660", "000660": "000660",
+    "naver": "035420", "035420": "035420",
+    "카카오": "035720", "035720": "035720",
+    "lg화학": "051910", "051910": "051910",
+    "애플": "AAPL", "aapl": "AAPL",
+    "마이크로소프트": "MSFT", "msft": "MSFT",
+    "엔비디아": "NVDA", "nvda": "NVDA",
+    "테슬라": "TSLA", "tsla": "TSLA"
+};
 
-async function loadStockData() {
-    const symbol = document.getElementById("stockSymbol").value.trim();
+document.getElementById("loadStockBtn").addEventListener("click", () => loadStockData(false));
+document.getElementById("loadDemoBtn").addEventListener("click", () => loadStockData(true));
+document.getElementById("playStockBtn").addEventListener("click", () => playAudio("stockAudio"));
+document.getElementById("readStockBtn").addEventListener("click", readStockSummary);
+document.getElementById("candleNavigator").addEventListener("input", updateCandleDetail);
+document.getElementById("previousCandleBtn").addEventListener("click", () => moveCandle(-1));
+document.getElementById("nextCandleBtn").addEventListener("click", () => moveCandle(1));
+
+async function loadStockData(demo = false) {
+    const query = document.getElementById("stockSearch").value.trim();
+    const symbol = STOCK_SYMBOLS[query.toLowerCase()] || STOCK_SYMBOLS[query] || query.toUpperCase();
     const interval = document.getElementById("stockInterval").value;
     const count = Number(document.getElementById("stockCount").value);
     const status = document.getElementById("stockStatus");
     const button = document.getElementById("loadStockBtn");
-    if (!symbol) return;
-    status.innerText = "토스증권에서 주식 데이터를 불러오는 중입니다.";
+    if (!symbol) {
+        status.innerText = "종목명이나 종목 코드를 입력하세요.";
+        document.getElementById("stockSearch").focus();
+        return;
+    }
+    status.innerText = demo ? "샘플 데이터를 준비하는 중입니다." : "토스증권에서 실시간 데이터를 불러오는 중입니다.";
     button.disabled = true;
+    document.getElementById("loadDemoBtn").disabled = true;
     try {
-        const params = new URLSearchParams({ symbol, interval, count: String(count) });
+        const params = new URLSearchParams({ symbol, interval, count: String(count), demo: String(demo) });
         const response = await fetch(`${SERVER_URL}/stock-candles?${params}`);
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || "주식 데이터를 불러오지 못했습니다.");
+        currentStockPayload = payload;
         stockData = payload.close_prices || [];
-        document.getElementById("stockSource").innerText = payload.source === "tossinvest" ? "토스증권 실시간 API" : "샘플 데이터";
+        stockCandles = payload.candles || [];
+        renderStockSummary(payload);
+        configureCandleNavigator();
+        document.getElementById("stockResults").hidden = false;
+        const source = document.getElementById("stockSource");
+        source.innerText = payload.source === "tossinvest" ? "토스증권 실데이터" : "샘플 체험 데이터";
+        source.className = `source-badge ${payload.source === "tossinvest" ? "live" : "demo"}`;
         document.getElementById("stockSummary").innerText = payload.analysis?.summary || "흐름 설명이 없습니다.";
-        renderStockChart(payload.candles || [], payload.symbol);
+        renderStockChart(stockCandles, payload.name);
         await prepareStockAudio();
         document.getElementById("playStockBtn").disabled = false;
-        status.innerText = `${payload.symbol}의 ${stockData.length}개 종가를 불러왔습니다.`;
+        status.innerText = `${payload.name}, ${stockData.length}개 봉을 불러왔습니다. 핵심 정보부터 확인하세요.`;
     } catch (error) {
+        currentStockPayload = null;
+        stockData = [];
+        stockCandles = [];
+        document.getElementById("stockResults").hidden = true;
         document.getElementById("playStockBtn").disabled = true;
-        status.innerText = error.message;
+        const source = document.getElementById("stockSource");
+        source.innerText = "실데이터 연결 실패";
+        source.className = "source-badge error";
+        status.innerText = `${error.message} 샘플로 체험하려면 '샘플로 체험' 버튼을 누르세요.`;
     } finally {
         button.disabled = false;
+        document.getElementById("loadDemoBtn").disabled = false;
     }
 }
 
-function renderStockChart(candles, symbol) {
+function formatPrice(value, currency) {
+    return new Intl.NumberFormat("ko-KR", {
+        style: "currency", currency, maximumFractionDigits: currency === "KRW" ? 0 : 2
+    }).format(value);
+}
+
+function renderStockSummary(payload) {
+    const { metrics, currency } = payload;
+    const sign = metrics.change > 0 ? "+" : "";
+    document.getElementById("stockName").innerText = `${payload.name} (${payload.symbol})`;
+    document.getElementById("metricLatest").innerText = formatPrice(metrics.latest, currency);
+    document.getElementById("metricChange").innerText = `${sign}${formatPrice(metrics.change, currency)} (${sign}${metrics.change_percent.toFixed(2)}%)`;
+    document.getElementById("metricChange").className = metrics.change > 0 ? "up" : metrics.change < 0 ? "down" : "";
+    document.getElementById("metricHigh").innerText = formatPrice(metrics.high, currency);
+    document.getElementById("metricLow").innerText = formatPrice(metrics.low, currency);
+    document.getElementById("stockTimestamp").innerText = `최근 봉 시각: ${formatTimestamp(metrics.latest_timestamp)}`;
+}
+
+function formatTimestamp(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function configureCandleNavigator() {
+    const navigator = document.getElementById("candleNavigator");
+    navigator.max = String(Math.max(0, stockCandles.length - 1));
+    navigator.value = String(Math.max(0, stockCandles.length - 1));
+    navigator.disabled = stockCandles.length === 0;
+    document.getElementById("previousCandleBtn").disabled = stockCandles.length === 0;
+    document.getElementById("nextCandleBtn").disabled = stockCandles.length === 0;
+    updateCandleDetail();
+}
+
+function moveCandle(offset) {
+    const navigator = document.getElementById("candleNavigator");
+    navigator.value = String(Math.max(0, Math.min(Number(navigator.max), Number(navigator.value) + offset)));
+    navigator.focus();
+    updateCandleDetail();
+}
+
+function updateCandleDetail() {
+    if (!stockCandles.length || !currentStockPayload) return;
+    const index = Number(document.getElementById("candleNavigator").value);
+    const candle = stockCandles[index];
+    const price = value => formatPrice(value, currentStockPayload.currency);
+    document.getElementById("candleDetail").innerText = `${index + 1}번째 봉, ${formatTimestamp(candle.timestamp)}. 시가 ${price(candle.open)}, 고가 ${price(candle.high)}, 저가 ${price(candle.low)}, 종가 ${price(candle.close)}.`;
+}
+
+function readStockSummary() {
+    if (!currentStockPayload) return;
+    stopAllAudio();
+    const text = `${document.getElementById("stockName").innerText}. 최근 종가 ${document.getElementById("metricLatest").innerText}. 조회 구간 변화 ${document.getElementById("metricChange").innerText}. ${document.getElementById("stockSummary").innerText}`;
+    const message = new SpeechSynthesisUtterance(text);
+    message.lang = "ko-KR";
+    message.rate = 1.0;
+    const koreanVoice = voices.find(voice => voice.lang.includes("ko"));
+    if (koreanVoice) message.voice = koreanVoice;
+    window.speechSynthesis.speak(message);
+}
+
+function renderStockChart(candles, name) {
     if (stockChartInstance) stockChartInstance.destroy();
     stockChartInstance = new Chart(document.getElementById("stockChart"), {
         type: "line",
-        data: { labels: candles.map(c => c.timestamp), datasets: [{ label: `${symbol} 종가`, data: candles.map(c => c.close), borderColor: "#176b57", borderWidth: 3, pointRadius: 2, tension: .15 }] },
+        data: { labels: candles.map(c => c.timestamp), datasets: [{ label: `${name} 종가`, data: candles.map(c => c.close), borderColor: "#176b57", borderWidth: 3, pointRadius: 2, tension: .15 }] },
         options: { responsive: true, plugins: { legend: { display: true } } }
     });
 }
@@ -498,6 +598,18 @@ document.getElementById("mixBtn").addEventListener("click", async () => {
 document.addEventListener("keydown", e => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === "Escape") stopAllAudio();
+    const isTyping = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
+    if (e.key === "/" && !isTyping) {
+        e.preventDefault();
+        document.getElementById("stockSearch").focus();
+        document.getElementById("stockSearch").select();
+        return;
+    }
+    if (e.key.toLowerCase() === "l" && !isTyping) {
+        loadStockData(false);
+        return;
+    }
+    if (isTyping) return;
     if (e.key.toLowerCase() === "i") document.getElementById("imageInput").click();
     
     if (e.key.toLowerCase() === "a" && !document.getElementById("analyzeImageBtn").disabled) {

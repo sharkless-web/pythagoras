@@ -6,6 +6,7 @@ from typing import List, Optional
 import numpy as np
 import engine
 import config
+from spatial_audio import generate_spatial_audio
 from stock_service import StockDataError, fetch_recent_candles, get_sample_candles
 
 app = FastAPI(title="Project Pythagoras Graph Accessibility API")
@@ -22,6 +23,18 @@ app.add_middleware(
 class SoundRequest(BaseModel):
     data: List[float]
     max_freq: float
+    waveform: str = "sine"
+
+
+class SpatialSoundRequest(BaseModel):
+    prices: List[float]
+    volumes: Optional[List[float]] = None
+    timestamps: Optional[List[str]] = None
+    min_frequency: float = config.DEFAULT_MIN_FREQ
+    max_frequency: float = config.DEFAULT_MAX_FREQ
+    min_amplitude: float = config.DEFAULT_MIN_AMPLITUDE
+    max_amplitude: float = config.DEFAULT_MAX_AMPLITUDE
+    duration_seconds: float = config.TOTAL_PLAY_TIME
     waveform: str = "sine"
 
 
@@ -84,6 +97,7 @@ def stock_candles(symbol: str = "005930", interval: str = "1m", count: int = 30,
             "source": series.source,
             "candles": [candle.__dict__ for candle in series.candles],
             "close_prices": closes,
+            "volumes": [candle.volume for candle in series.candles],
             "metrics": {
                 "latest": latest,
                 "change": change,
@@ -100,9 +114,43 @@ def stock_candles(symbol: str = "005930", interval: str = "1m", count: int = 30,
 
 @app.post("/sonify-data")
 async def sonify_data(req: SoundRequest):
-    resampled_data = resample_data(req.data, config.TOTAL_PLAY_TIME, config.SAMPLE_RATE)
-    audio_vf = engine.generate_stereo_sound(resampled_data, req.max_freq, req.waveform)
-    return StreamingResponse(audio_vf, media_type="audio/wav")
+    try:
+        resampled_data = resample_data(req.data, config.TOTAL_PLAY_TIME, config.SAMPLE_RATE)
+        audio_vf = engine.generate_stereo_sound(resampled_data, req.max_freq, req.waveform)
+        return StreamingResponse(audio_vf, media_type="audio/wav")
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=422)
+
+
+@app.post("/sonify-spatial")
+async def sonify_spatial(req: SpatialSoundRequest):
+    """Sonify aligned primary and supporting time-series data."""
+    if req.volumes is not None and len(req.prices) != len(req.volumes):
+        return JSONResponse(
+            {"detail": "prices and volumes must have the same length"}, status_code=422
+        )
+    if req.timestamps is not None and len(req.prices) != len(req.timestamps):
+        return JSONResponse(
+            {"detail": "prices and timestamps must have the same length"}, status_code=422
+        )
+    try:
+        audio_vf = generate_spatial_audio(
+            req.prices,
+            req.volumes,
+            min_frequency=req.min_frequency,
+            max_frequency=req.max_frequency,
+            min_amplitude=req.min_amplitude,
+            max_amplitude=req.max_amplitude,
+            duration_seconds=req.duration_seconds,
+            waveform_type=req.waveform,
+        )
+        return StreamingResponse(
+            audio_vf,
+            media_type="audio/wav",
+            headers={"X-Data-Points": str(len(req.prices))},
+        )
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=422)
 
 
 @app.post("/mix-data")

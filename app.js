@@ -1,4 +1,4 @@
-const SERVER_URL = "http://127.0.0.1:8000";
+const SERVER_URL = "http://127.0.0.1:8001";
 
 // 전역 변수
 let selectedImageFile = null,
@@ -10,11 +10,22 @@ let extractedGraphData = [],
     stockData = [],
     stockCandles = [],
     currentStockPayload = null,
+    stockVolumes = [],
     csvData = [],
+    csvRows = [],
+    csvColumns = [],
     mixCandidates = [],
     chartInstance = null,
     voices = [],
     stockChartInstance = null;
+
+let activeSeries = null,
+    playbackSpeed = 1,
+    spatialAudioUrl = null,
+    pendingSeekIndex = null;
+
+const BASE_PLAYBACK_SECONDS = 8;
+const SPEED_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 // DOM 요소
 const canvas = document.getElementById("imageCanvas"),
@@ -38,9 +49,34 @@ document.getElementById("freqSlider").addEventListener("input", e => {
     document.getElementById("freqVal").innerText = e.target.value;
 });
 
+document.getElementById("minFreqSlider").addEventListener("input", e => {
+    document.getElementById("minFreqVal").innerText = e.target.value;
+});
+
+document.getElementById("minAmplitudeSlider").addEventListener("input", e => {
+    document.getElementById("minAmplitudeVal").innerText = Math.round(Number(e.target.value) * 100);
+});
+
+document.getElementById("maxAmplitudeSlider").addEventListener("input", e => {
+    document.getElementById("maxAmplitudeVal").innerText = Math.round(Number(e.target.value) * 100);
+});
+
+document.getElementById("masterVolumeSlider").addEventListener("input", e => {
+    document.getElementById("masterVolumeVal").innerText = Math.round(Number(e.target.value) * 100);
+    document.getElementById("spatialAudio").volume = Number(e.target.value);
+});
+
+["minFreqSlider", "freqSlider", "minAmplitudeSlider", "maxAmplitudeSlider"].forEach(id => {
+    document.getElementById(id).addEventListener("change", () => {
+        if (activeSeries) rebuildActiveAudio(true).catch(error => {
+            document.getElementById("playbackState").innerText = error.message;
+        });
+    });
+});
+
 document.getElementById("waveSelect").addEventListener("change", () => {
     if (extractedGraphData.length > 0) prepareGraphAudio();
-    if (stockData.length > 0) prepareStockAudio();
+    if (activeSeries) rebuildActiveAudio(true);
 });
 
 const STOCK_SYMBOLS = {
@@ -57,7 +93,10 @@ const STOCK_SYMBOLS = {
 
 document.getElementById("loadStockBtn").addEventListener("click", () => loadStockData(false));
 document.getElementById("loadDemoBtn").addEventListener("click", () => loadStockData(true));
-document.getElementById("playStockBtn").addEventListener("click", () => playAudio("stockAudio"));
+document.getElementById("playStockBtn").addEventListener("click", async () => {
+    if (currentStockPayload && activeSeries?.source !== "stock") await prepareStockAudio();
+    playPauseActiveAudio();
+});
 document.getElementById("readStockBtn").addEventListener("click", readStockSummary);
 document.getElementById("candleNavigator").addEventListener("input", updateCandleDetail);
 document.getElementById("previousCandleBtn").addEventListener("click", () => moveCandle(-1));
@@ -86,6 +125,7 @@ async function loadStockData(demo = false) {
         currentStockPayload = payload;
         stockData = payload.close_prices || [];
         stockCandles = payload.candles || [];
+        stockVolumes = payload.volumes || stockCandles.map(candle => candle.volume);
         renderStockSummary(payload);
         configureCandleNavigator();
         document.getElementById("stockResults").hidden = false;
@@ -101,6 +141,7 @@ async function loadStockData(demo = false) {
         currentStockPayload = null;
         stockData = [];
         stockCandles = [];
+        stockVolumes = [];
         document.getElementById("stockResults").hidden = true;
         document.getElementById("playStockBtn").disabled = true;
         const source = document.getElementById("stockSource");
@@ -158,19 +199,16 @@ function updateCandleDetail() {
     const index = Number(document.getElementById("candleNavigator").value);
     const candle = stockCandles[index];
     const price = value => formatPrice(value, currentStockPayload.currency);
-    document.getElementById("candleDetail").innerText = `${index + 1}번째 봉, ${formatTimestamp(candle.timestamp)}. 시가 ${price(candle.open)}, 고가 ${price(candle.high)}, 저가 ${price(candle.low)}, 종가 ${price(candle.close)}.`;
+    const percentage = stockCandles.length > 1 ? Math.round(index / (stockCandles.length - 1) * 100) : 100;
+    const volume = Number.isFinite(Number(candle.volume)) ? `${new Intl.NumberFormat("ko-KR").format(candle.volume)}` : "정보 없음";
+    document.getElementById("candleDetail").innerText = `${index + 1}번째 봉, 전체의 ${percentage}퍼센트, ${formatTimestamp(candle.timestamp)}. 시가 ${price(candle.open)}, 고가 ${price(candle.high)}, 저가 ${price(candle.low)}, 종가 ${price(candle.close)}, 거래량 ${volume}.`;
+    if (activeSeries?.source === "stock") seekToIndex(index, false);
 }
 
 function readStockSummary() {
     if (!currentStockPayload) return;
-    stopAllAudio();
     const text = `${document.getElementById("stockName").innerText}. 최근 종가 ${document.getElementById("metricLatest").innerText}. 조회 구간 변화 ${document.getElementById("metricChange").innerText}. ${document.getElementById("stockSummary").innerText}`;
-    const message = new SpeechSynthesisUtterance(text);
-    message.lang = "ko-KR";
-    message.rate = 1.0;
-    const koreanVoice = voices.find(voice => voice.lang.includes("ko"));
-    if (koreanVoice) message.voice = koreanVoice;
-    window.speechSynthesis.speak(message);
+    speakText(text);
 }
 
 function renderStockChart(candles, name) {
@@ -184,8 +222,18 @@ function renderStockChart(candles, name) {
 
 async function prepareStockAudio() {
     if (!stockData.length) return;
-    const blob = await requestAudio(stockData, document.getElementById("waveSelect").value);
-    document.getElementById("stockAudio").src = URL.createObjectURL(blob);
+    const usableVolumes = stockVolumes.length === stockData.length && stockVolumes.every(value => Number.isFinite(Number(value)))
+        ? stockVolumes.map(Number) : null;
+    await activateSeries({
+        label: `${currentStockPayload.name} 종가와 거래량`,
+        source: "stock",
+        timestamps: stockCandles.map(candle => candle.timestamp),
+        prices: stockData.map(Number),
+        volumes: usableVolumes,
+        priceLabel: "종가",
+        volumeLabel: "거래량",
+        currency: currentStockPayload.currency
+    });
 }
 
 function setStatus(text) {
@@ -432,17 +480,212 @@ async function requestAudio(data, waveform) {
     return await res.blob();
 }
 
+function getSpatialSettings() {
+    const settings = {
+        min_frequency: Number(document.getElementById("minFreqSlider").value),
+        max_frequency: Number(document.getElementById("freqSlider").value),
+        min_amplitude: Number(document.getElementById("minAmplitudeSlider").value),
+        max_amplitude: Number(document.getElementById("maxAmplitudeSlider").value),
+        duration_seconds: BASE_PLAYBACK_SECONDS / playbackSpeed,
+        waveform: document.getElementById("waveSelect").value
+    };
+    if (settings.max_frequency <= settings.min_frequency) {
+        throw new Error("최대 음높이는 최소 음높이보다 커야 합니다.");
+    }
+    if (settings.max_amplitude <= settings.min_amplitude) {
+        throw new Error("최대 음량은 최소 음량보다 커야 합니다.");
+    }
+    return settings;
+}
+
+async function requestSpatialAudio(series) {
+    const payload = {
+        prices: series.prices,
+        volumes: series.volumes,
+        timestamps: series.timestamps,
+        ...getSpatialSettings()
+    };
+    const response = await fetch(`${SERVER_URL}/sonify-spatial`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || "공간음향 생성에 실패했습니다.");
+    }
+    return response.blob();
+}
+
+async function activateSeries(series) {
+    if (!series || series.prices.length < 2) throw new Error("두 개 이상의 데이터가 필요합니다.");
+    activeSeries = series;
+    const slider = document.getElementById("positionSlider");
+    slider.max = String(series.prices.length - 1);
+    slider.value = "0";
+    slider.disabled = false;
+    document.getElementById("activeSeriesLabel").innerText = `${series.label}, ${series.prices.length}개 시점`;
+    setPlayerControlsDisabled(false);
+    renderActivePoint(0);
+    await rebuildActiveAudio(false);
+}
+
+async function rebuildActiveAudio(preservePosition = true) {
+    if (!activeSeries) return;
+    const audio = document.getElementById("spatialAudio");
+    const progress = preservePosition && Number.isFinite(audio.duration) && audio.duration > 0
+        ? audio.currentTime / audio.duration : 0;
+    document.getElementById("playbackState").innerText = "공간음향 생성 중";
+    setPlayerControlsDisabled(true);
+    try {
+        const blob = await requestSpatialAudio(activeSeries);
+        if (spatialAudioUrl) URL.revokeObjectURL(spatialAudioUrl);
+        spatialAudioUrl = URL.createObjectURL(blob);
+        audio.src = spatialAudioUrl;
+        audio.volume = Number(document.getElementById("masterVolumeSlider").value);
+        pendingSeekIndex = Math.round(progress * (activeSeries.prices.length - 1));
+        audio.load();
+        document.getElementById("playbackState").innerText = "재생 준비 완료";
+    } catch (error) {
+        document.getElementById("playbackState").innerText = error.message;
+        throw error;
+    } finally {
+        setPlayerControlsDisabled(false);
+    }
+}
+
+function setPlayerControlsDisabled(disabled) {
+    ["playPauseBtn", "restartBtn", "previousSegmentBtn", "nextSegmentBtn", "slowerBtn", "fasterBtn", "announcePositionBtn"].forEach(id => {
+        document.getElementById(id).disabled = disabled || !activeSeries;
+    });
+}
+
+function playPauseActiveAudio() {
+    const audio = document.getElementById("spatialAudio");
+    if (!audio.src) return;
+    window.speechSynthesis.cancel();
+    if (audio.paused) audio.play();
+    else audio.pause();
+}
+
+function restartActiveAudio() {
+    const audio = document.getElementById("spatialAudio");
+    if (!audio.src) return;
+    audio.currentTime = 0;
+    document.getElementById("positionSlider").value = "0";
+    renderActivePoint(0);
+    audio.play();
+}
+
+function seekToIndex(index, announce = false) {
+    if (!activeSeries) return;
+    const bounded = Math.max(0, Math.min(activeSeries.prices.length - 1, Number(index)));
+    const slider = document.getElementById("positionSlider");
+    slider.value = String(bounded);
+    const audio = document.getElementById("spatialAudio");
+    if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        audio.currentTime = bounded / Math.max(1, activeSeries.prices.length - 1) * audio.duration;
+    } else {
+        pendingSeekIndex = bounded;
+    }
+    renderActivePoint(bounded);
+    if (announce) announceCurrentPosition();
+}
+
+function moveActiveSegment(direction) {
+    if (!activeSeries) return;
+    const step = Math.max(1, Math.ceil(activeSeries.prices.length / 10));
+    const current = Number(document.getElementById("positionSlider").value);
+    seekToIndex(current + direction * step, true);
+}
+
+async function changePlaybackSpeed(direction) {
+    const current = SPEED_STEPS.indexOf(playbackSpeed);
+    const next = Math.max(0, Math.min(SPEED_STEPS.length - 1, current + direction));
+    if (next === current) return;
+    playbackSpeed = SPEED_STEPS[next];
+    document.getElementById("speedState").innerText = `속도 ${playbackSpeed}배`;
+    await rebuildActiveAudio(true);
+    speakText(`재생 속도 ${playbackSpeed}배`);
+}
+
+function formatActivePrice(value) {
+    if (activeSeries?.currency) return formatPrice(value, activeSeries.currency);
+    return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 3 }).format(value);
+}
+
+function renderActivePoint(index) {
+    if (!activeSeries) return;
+    const bounded = Math.max(0, Math.min(activeSeries.prices.length - 1, Number(index)));
+    const percentage = activeSeries.prices.length > 1
+        ? Math.round(bounded / (activeSeries.prices.length - 1) * 100) : 100;
+    const timestamp = activeSeries.timestamps?.[bounded] ?? `${bounded + 1}번째 시점`;
+    const volume = activeSeries.volumes
+        ? new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(activeSeries.volumes[bounded])
+        : "사용하지 않음";
+    document.getElementById("currentPosition").innerText = `전체의 ${percentage}% · ${bounded + 1}/${activeSeries.prices.length}`;
+    document.getElementById("currentPointDetail").innerText = `${formatTimestamp(timestamp)}. ${activeSeries.priceLabel || "주 데이터"} ${formatActivePrice(activeSeries.prices[bounded])}. ${activeSeries.volumeLabel || "보조 데이터"} ${volume}.`;
+}
+
+function announceCurrentPosition() {
+    if (!activeSeries) return;
+    const index = Number(document.getElementById("positionSlider").value);
+    const percentage = activeSeries.prices.length > 1
+        ? Math.round(index / (activeSeries.prices.length - 1) * 100) : 100;
+    speakText(`현재 전체의 ${percentage}퍼센트 지점입니다. ${document.getElementById("currentPointDetail").innerText} 재생 속도 ${playbackSpeed}배입니다.`);
+}
+
+function speakText(text) {
+    document.querySelectorAll("audio").forEach(audio => audio.pause());
+    window.speechSynthesis.cancel();
+    const message = new SpeechSynthesisUtterance(text);
+    message.lang = "ko-KR";
+    message.rate = 1;
+    const koreanVoice = voices.find(voice => voice.lang.includes("ko"));
+    if (koreanVoice) message.voice = koreanVoice;
+    window.speechSynthesis.speak(message);
+}
+
+const spatialAudio = document.getElementById("spatialAudio");
+spatialAudio.volume = Number(document.getElementById("masterVolumeSlider").value);
+spatialAudio.addEventListener("loadedmetadata", () => {
+    if (pendingSeekIndex !== null) {
+        seekToIndex(pendingSeekIndex, false);
+        pendingSeekIndex = null;
+    }
+});
+spatialAudio.addEventListener("play", () => {
+    document.getElementById("playbackState").innerText = "재생 중";
+    document.getElementById("playPauseBtn").innerText = "일시정지";
+});
+spatialAudio.addEventListener("pause", () => {
+    document.getElementById("playbackState").innerText = spatialAudio.ended ? "재생 완료" : "일시정지";
+    document.getElementById("playPauseBtn").innerText = "재생";
+});
+spatialAudio.addEventListener("ended", () => {
+    document.getElementById("playbackState").innerText = "재생 완료";
+    document.getElementById("playPauseBtn").innerText = "재생";
+});
+spatialAudio.addEventListener("timeupdate", () => {
+    if (!activeSeries || !Number.isFinite(spatialAudio.duration) || spatialAudio.duration <= 0) return;
+    const progress = Math.min(1, spatialAudio.currentTime / spatialAudio.duration);
+    const index = Math.round(progress * (activeSeries.prices.length - 1));
+    document.getElementById("positionSlider").value = String(index);
+    renderActivePoint(index);
+});
+
+document.getElementById("playPauseBtn").addEventListener("click", playPauseActiveAudio);
+document.getElementById("restartBtn").addEventListener("click", restartActiveAudio);
+document.getElementById("previousSegmentBtn").addEventListener("click", () => moveActiveSegment(-1));
+document.getElementById("nextSegmentBtn").addEventListener("click", () => moveActiveSegment(1));
+document.getElementById("slowerBtn").addEventListener("click", () => changePlaybackSpeed(-1));
+document.getElementById("fasterBtn").addEventListener("click", () => changePlaybackSpeed(1));
+document.getElementById("announcePositionBtn").addEventListener("click", announceCurrentPosition);
+document.getElementById("positionSlider").addEventListener("input", event => seekToIndex(Number(event.target.value), false));
+
 // TTS 설명 읽기
 function readGraphDescription() {
-    stopAllAudio();
-    const msg = new SpeechSynthesisUtterance(document.getElementById("graphSummary").innerText);
-    msg.lang = "ko-KR";
-    msg.rate = 1.05;
-    
-    const ko = voices.find(v => v.lang.includes("ko"));
-    if (ko) msg.voice = ko;
-    
-    window.speechSynthesis.speak(msg);
+    speakText(document.getElementById("graphSummary").innerText);
 }
 
 function stopAllAudio() {
@@ -474,37 +717,162 @@ document.getElementById("csvInput").addEventListener("change", e => {
     });
 });
 
+document.getElementById("loadCsvSampleBtn").addEventListener("click", async () => {
+    const status = document.getElementById("csvStatus");
+    status.innerText = "내장 샘플 CSV를 불러오는 중입니다.";
+    try {
+        const response = await fetch("stock_spatial_sample.csv");
+        if (!response.ok) throw new Error("샘플 CSV를 읽지 못했습니다.");
+        const text = await response.text();
+        Papa.parse(text, {
+            header: true,
+            dynamicTyping: true,
+            skipEmptyLines: true,
+            complete: result => processCSV(result.data)
+        });
+    } catch (error) {
+        status.innerText = error.message;
+    }
+});
+
 function processCSV(rows) {
     if (!rows.length) return alert("CSV 데이터가 없습니다.");
-    
-    const columns = Object.keys(rows[0]);
-    const keys = ["time", "date", "index", "year", "month", "day", "시간", "날짜", "연도"];
-    
-    let labels = rows.map((_, i) => i + 1);
-    let dataColumns = [...columns];
-    
-    if (keys.some(k => columns[0].toLowerCase().includes(k))) {
-        labels = rows.map(row => row[columns[0]]);
-        dataColumns = columns.slice(1);
-    }
-    
-    csvData = dataColumns.map(column => {
+    csvRows = rows;
+    csvColumns = Object.keys(rows[0]);
+    const timeKeys = ["timestamp", "time", "date", "index", "year", "시간", "날짜", "시각"];
+    const priceKeys = ["price", "close", "value", "가격", "종가", "주가"];
+    const volumeKeys = ["volume", "vol", "거래량"];
+    const findColumn = keys => csvColumns.find(column => keys.some(key => column.toLowerCase().includes(key)));
+    const numericColumns = csvColumns.filter(column => rows.some(row => Number.isFinite(Number(row[column]))));
+    const timeColumn = findColumn(timeKeys) || "";
+    const priceColumn = findColumn(priceKeys) || numericColumns.find(column => column !== timeColumn) || "";
+    const volumeColumn = findColumn(volumeKeys) || "";
+
+    populateColumnSelect("timeColumnSelect", csvColumns, timeColumn, true, "행 번호 사용");
+    populateColumnSelect("priceColumnSelect", numericColumns, priceColumn, false);
+    populateColumnSelect("volumeColumnSelect", numericColumns, volumeColumn, true, "일정한 음량 사용");
+    document.getElementById("csvColumnControls").hidden = false;
+
+    const labels = rows.map((row, index) => timeColumn ? row[timeColumn] : index + 1);
+    csvData = numericColumns.map(column => {
         const raw = rows.map(row => Number(row[column])).filter(Number.isFinite);
         if (!raw.length) return null;
-        
         const min = Math.min(...raw);
         const max = Math.max(...raw);
         const scaled = raw.map(v => max !== min ? (v - min) / (max - min) : .5);
-        
         return { name: column, raw, scaled, min, max };
     }).filter(Boolean);
-    
     drawCsvChart(labels, csvData);
     renderCsvResults();
+    document.getElementById("csvStatus").innerText = `${rows.length}개 행을 읽었습니다. 주 데이터 ${priceColumn || "미선택"}, 보조 데이터 ${volumeColumn || "사용 안 함"}. 열을 확인한 뒤 공간음향을 생성하세요.`;
 }
+
+function populateColumnSelect(id, columns, selected, allowEmpty = false, emptyLabel = "선택 안 함") {
+    const select = document.getElementById(id);
+    select.innerHTML = "";
+    if (allowEmpty) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = emptyLabel;
+        select.appendChild(option);
+    }
+    columns.forEach(column => {
+        const option = document.createElement("option");
+        option.value = column;
+        option.textContent = column;
+        option.selected = column === selected;
+        select.appendChild(option);
+    });
+}
+
+function getSelectedCsvSeries() {
+    const timeColumn = document.getElementById("timeColumnSelect").value;
+    const priceColumn = document.getElementById("priceColumnSelect").value;
+    const volumeColumn = document.getElementById("volumeColumnSelect").value;
+    if (!priceColumn) throw new Error("Pitch로 사용할 주 데이터 열을 선택하세요.");
+
+    const aligned = [];
+    csvRows.forEach((row, index) => {
+        const price = Number(row[priceColumn]);
+        const volume = volumeColumn ? Number(row[volumeColumn]) : null;
+        if (!Number.isFinite(price)) return;
+        if (volumeColumn && (!Number.isFinite(volume) || volume < 0)) return;
+        aligned.push({
+            timestamp: timeColumn ? String(row[timeColumn]) : `${index + 1}번째 시점`,
+            price,
+            volume
+        });
+    });
+    if (aligned.length < 2) throw new Error("선택한 열에서 유효한 데이터 두 개 이상을 찾지 못했습니다.");
+    return {
+        label: `${priceColumn}${volumeColumn ? ` + ${volumeColumn}` : ""}`,
+        source: "csv",
+        timestamps: aligned.map(item => item.timestamp),
+        prices: aligned.map(item => item.price),
+        volumes: volumeColumn ? aligned.map(item => item.volume) : null,
+        priceLabel: priceColumn,
+        volumeLabel: volumeColumn || "보조 데이터"
+    };
+}
+
+async function createCsvSpatialAudio() {
+    const status = document.getElementById("csvStatus");
+    try {
+        status.innerText = "공간음향을 생성하는 중입니다.";
+        const series = getSelectedCsvSeries();
+        drawSpatialChart(series);
+        await activateSeries(series);
+        status.innerText = `${series.prices.length}개 시점의 공간음향을 생성했습니다. 공통 재생기에서 들을 수 있습니다.`;
+        document.getElementById("playerControls").scrollIntoView({ behavior: "smooth", block: "start" });
+        document.getElementById("playPauseBtn").focus();
+    } catch (error) {
+        status.innerText = error.message;
+    }
+}
+
+function drawSpatialChart(series) {
+    const element = document.getElementById("lineChart");
+    element.hidden = false;
+    if (chartInstance) chartInstance.destroy();
+    const datasets = [{
+        label: `${series.priceLabel} · Pitch`,
+        data: series.prices,
+        borderColor: "#176b57",
+        backgroundColor: "transparent",
+        borderWidth: 3,
+        pointRadius: 2,
+        tension: .15,
+        yAxisID: "priceAxis"
+    }];
+    if (series.volumes) datasets.push({
+        label: `${series.volumeLabel} · Volume`,
+        data: series.volumes,
+        borderColor: "#8b4db8",
+        backgroundColor: "rgba(139,77,184,.16)",
+        borderWidth: 2,
+        pointRadius: 1,
+        fill: true,
+        yAxisID: "volumeAxis"
+    });
+    chartInstance = new Chart(element, {
+        type: "line",
+        data: { labels: series.timestamps, datasets },
+        options: {
+            responsive: true,
+            interaction: { mode: "index", intersect: false },
+            scales: {
+                priceAxis: { type: "linear", position: "left", title: { display: true, text: "주 데이터 · Pitch" } },
+                volumeAxis: { type: "linear", position: "right", display: Boolean(series.volumes), grid: { drawOnChartArea: false }, title: { display: Boolean(series.volumes), text: "보조 데이터 · Volume" } }
+            }
+        }
+    });
+}
+
+document.getElementById("createCsvSpatialBtn").addEventListener("click", createCsvSpatialAudio);
 
 function drawCsvChart(labels, datasets) {
     const el = document.getElementById("lineChart");
+    el.hidden = false;
     if (chartInstance) chartInstance.destroy();
     
     chartInstance = new Chart(el, {
@@ -594,7 +962,7 @@ document.getElementById("mixBtn").addEventListener("click", async () => {
     playAudio("mixAudio");
 });
 
-// 단축키 설정
+// 중앙 Shortcut Map. 입력 요소를 조작하는 동안에는 전역 단축키를 실행하지 않는다.
 document.addEventListener("keydown", e => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === "Escape") stopAllAudio();
@@ -610,13 +978,48 @@ document.addEventListener("keydown", e => {
         return;
     }
     if (isTyping) return;
+    if (e.key === " " && activeSeries) {
+        e.preventDefault();
+        playPauseActiveAudio();
+        return;
+    }
+    if (e.key === "Home" && activeSeries) {
+        e.preventDefault();
+        restartActiveAudio();
+        return;
+    }
+    if (e.key.toLowerCase() === "j" && activeSeries) {
+        e.preventDefault();
+        moveActiveSegment(-1);
+        return;
+    }
+    if (e.key.toLowerCase() === "k" && activeSeries) {
+        e.preventDefault();
+        moveActiveSegment(1);
+        return;
+    }
+    if (e.key === "[" && activeSeries) {
+        e.preventDefault();
+        changePlaybackSpeed(-1);
+        return;
+    }
+    if (e.key === "]" && activeSeries) {
+        e.preventDefault();
+        changePlaybackSpeed(1);
+        return;
+    }
+    if (e.key.toLowerCase() === "p" && activeSeries) {
+        e.preventDefault();
+        announceCurrentPosition();
+        return;
+    }
     if (e.key.toLowerCase() === "i") document.getElementById("imageInput").click();
     
     if (e.key.toLowerCase() === "a" && !document.getElementById("analyzeImageBtn").disabled) {
         analyzeImage();
     }
     
-    if (e.key === " " && !document.getElementById("playGraphAudioBtn").disabled) {
+    if (e.key === " " && !activeSeries && !document.getElementById("playGraphAudioBtn").disabled) {
         e.preventDefault();
         playAudio("graphAudio");
     }

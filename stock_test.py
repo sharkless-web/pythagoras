@@ -81,6 +81,8 @@ class StockServiceTest(unittest.TestCase):
         payload = server.stock_candles("005930", "1m", 30, demo=True)
         self.assertEqual(payload["source"], "sample")
         self.assertEqual(payload["name"], "삼성전자")
+        self.assertEqual(len(payload["volumes"]), 30)
+        self.assertEqual(payload["volumes"][0], 100000.0)
         self.assertIn("latest", payload["metrics"])
         self.assertIn("change_percent", payload["metrics"])
 

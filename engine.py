@@ -8,6 +8,7 @@ from scipy import signal
 from scipy.io.wavfile import write
 
 import config
+from spatial_audio import generate_spatial_audio
 
 
 def _generate_beeps(data_values):
@@ -63,40 +64,13 @@ def _wave_from_phase(phases, waveform_type):
 # 1. Single-channel sonification engine
 
 def generate_stereo_sound(data_values, user_max_f, waveform_type="sine"):
-    pad_len = int(0.1 * config.SAMPLE_RATE)
-    data_values = np.asarray(data_values, dtype=float)
-    data_values = np.pad(data_values, (pad_len, pad_len), mode="edge")
-
-    n = len(data_values)
-    if n == 0:
-        return None
-
-    min_freq = config.DEFAULT_MIN_FREQ
-    max_freq = float(user_max_f)
-    min_val, max_val = np.min(data_values), np.max(data_values)
-
-    if max_val == min_val:
-        freqs = np.full(n, min_freq)
-    else:
-        normalized_data = (data_values - min_val) / (max_val - min_val + 1e-9)
-        # 200Hz ~ 800Hz 구간을 지수형으로 부드럽게 스케일링
-        freqs = min_freq * np.power((max_freq / min_freq), normalized_data)
-
-    phases = np.cumsum(freqs) * (2 * np.pi / config.SAMPLE_RATE)
-    wave = _wave_from_phase(phases, waveform_type)
-    wave += _generate_beeps(data_values)
-
-    pan_array = np.linspace(0.0, 1.0, n)
-    left_channel = wave * np.cos(pan_array * np.pi / 2)
-    right_channel = wave * np.sin(pan_array * np.pi / 2)
-
-    audio_stereo = np.vstack((left_channel, right_channel)).T
-    audio_stereo = np.int16(audio_stereo / (np.max(np.abs(audio_stereo)) + 1e-9) * 32767)
-
-    vf = io.BytesIO()
-    write(vf, config.SAMPLE_RATE, audio_stereo)
-    vf.seek(0)
-    return vf
+    """Backward-compatible price-only wrapper around the spatial engine."""
+    return generate_spatial_audio(
+        data_values,
+        min_frequency=config.DEFAULT_MIN_FREQ,
+        max_frequency=float(user_max_f),
+        waveform_type=waveform_type,
+    )
 
 
 # 2. Multi-channel mixing engine

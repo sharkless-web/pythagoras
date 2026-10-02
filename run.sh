@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-echo "Starting FastAPI server at http://127.0.0.1:8000"
-python -m uvicorn server:app --host 127.0.0.1 --port 8000 &
+echo "Starting FastAPI server at http://127.0.0.1:8001"
+python -m uvicorn server:app --host 127.0.0.1 --port 8001 &
 API_PID=$!
 
 echo "Starting web UI at http://127.0.0.1:5500"

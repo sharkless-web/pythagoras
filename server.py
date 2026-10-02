@@ -1,6 +1,9 @@
+from pathlib import Path
+
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional
 import numpy as np
@@ -10,11 +13,12 @@ from spatial_audio import generate_spatial_audio
 from stock_service import StockDataError, fetch_recent_candles, fetch_stock_rankings, get_sample_candles
 
 app = FastAPI(title="Project Pythagoras Graph Accessibility API")
+BASE_DIR = Path(__file__).resolve().parent
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["http://127.0.0.1:5500", "http://localhost:5500"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -183,3 +187,8 @@ async def analyze_graph_image(
         return JSONResponse({"detail": str(exc)}, status_code=422)
     except Exception as exc:
         return JSONResponse({"detail": f"그래프 이미지 분석 중 오류가 발생했습니다: {exc}"}, status_code=500)
+
+
+# Keep this mount last so the API routes above take precedence. This lets the
+# local app and a Cloudflare Quick Tunnel use one origin and one public URL.
+app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="web")

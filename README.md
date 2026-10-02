@@ -52,14 +52,34 @@ pip install -r requirements.txt
 python -m uvicorn server:app --reload --port 8001
 ```
 
-별도 터미널에서 웹 서버를 실행합니다.
+FastAPI가 웹 UI와 API를 같은 주소에서 제공합니다.
+
+- 웹 UI: `http://127.0.0.1:8001`
+- API 문서: `http://127.0.0.1:8001/docs`
+
+## Cloudflare Quick Tunnel로 팀 공유
+
+`cloudflared`를 설치한 뒤 로컬 서버를 실행합니다.
 
 ```bash
-python -m http.server 5500
+python -m uvicorn server:app --host 127.0.0.1 --port 8001
 ```
 
-- 웹 UI: `http://127.0.0.1:5500`
-- API 문서: `http://127.0.0.1:8001/docs`
+다른 터미널에서 Quick Tunnel을 실행합니다.
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8001
+```
+
+출력된 `https://...trycloudflare.com` 주소를 팀원에게 공유합니다. Quick Tunnel 프로세스와 이 PC가 켜져 있는 동안에만 접속할 수 있으며 주소는 다시 실행할 때 바뀝니다.
+
+허용된 이메일만 접속하게 하려면 다음처럼 실행합니다.
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8001 --allowed-mail teammate@example.com
+```
+
+토스증권에는 Quick Tunnel 주소가 아니라 이 서버 PC가 인터넷에 접속할 때 사용하는 공인 IP를 허용 IP로 등록합니다. API 인증정보는 계속 서버 환경변수로만 관리합니다.
 
 ## 주식 API 설정
 

@@ -1,4 +1,6 @@
-const SERVER_URL = "http://127.0.0.1:8001";
+const isSeparateLocalFrontend = ["127.0.0.1", "localhost"].includes(window.location.hostname)
+    && window.location.port === "5500";
+const SERVER_URL = isSeparateLocalFrontend ? "http://127.0.0.1:8001" : window.location.origin;
 
 // 전역 변수
 let selectedImageFile = null,

@@ -22,3 +22,6 @@ Thumbs.db
 
 # Generated media/cache
 *.wav
+
+# Local deployment tools
+.tools/

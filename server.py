@@ -6,6 +6,8 @@ from typing import List, Optional
 import numpy as np
 import engine
 import config
+from spatial_audio import generate_spatial_audio
+from stock_service import StockDataError, fetch_recent_candles, fetch_stock_rankings, get_sample_candles
 
 app = FastAPI(title="Project Pythagoras Graph Accessibility API")
 
@@ -24,10 +26,16 @@ class SoundRequest(BaseModel):
     waveform: str = "sine"
 
 
-class MixRequest(BaseModel):
-    data_list: List[List[float]]
-    max_freq: float
-    waveform_list: List[str]
+class SpatialSoundRequest(BaseModel):
+    prices: List[float]
+    volumes: Optional[List[float]] = None
+    timestamps: Optional[List[str]] = None
+    min_frequency: float = config.DEFAULT_MIN_FREQ
+    max_frequency: float = config.DEFAULT_MAX_FREQ
+    min_amplitude: float = config.DEFAULT_MIN_AMPLITUDE
+    max_amplitude: float = config.DEFAULT_MAX_AMPLITUDE
+    duration_seconds: float = config.TOTAL_PLAY_TIME
+    waveform: str = "sine"
 
 
 def resample_data(data: List[float], target_duration_sec: float, sample_rate: int) -> np.ndarray:
@@ -37,19 +45,121 @@ def resample_data(data: List[float], target_duration_sec: float, sample_rate: in
     return np.interp(target_indices, original_indices, data)
 
 
+STOCK_NAMES = {
+    "005930": ("삼성전자", "KRW"),
+    "000660": ("SK하이닉스", "KRW"),
+    "035420": ("NAVER", "KRW"),
+    "035720": ("카카오", "KRW"),
+    "051910": ("LG화학", "KRW"),
+    "AAPL": ("애플", "USD"),
+    "MSFT": ("마이크로소프트", "USD"),
+    "NVDA": ("엔비디아", "USD"),
+    "TSLA": ("테슬라", "USD"),
+}
+
+
+@app.get("/stock-search")
+def stock_search(q: str = ""):
+    query = q.strip().lower()
+    matches = [
+        {"symbol": symbol, "name": name, "currency": currency}
+        for symbol, (name, currency) in STOCK_NAMES.items()
+        if not query or query in symbol.lower() or query in name.lower()
+    ]
+    return {"results": matches[:10]}
+
+
+@app.get("/stock-rankings")
+def stock_rankings(
+    type: str = "MARKET_TRADING_AMOUNT",
+    market_country: str = "KR",
+    duration: str = "realtime",
+    count: int = 10,
+):
+    try:
+        return fetch_stock_rankings(type, market_country, duration, count)
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=422)
+    except StockDataError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=503)
+
+
+@app.get("/stock-candles")
+def stock_candles(symbol: str = "005930", interval: str = "1m", count: int = 30, demo: bool = False):
+    try:
+        series = get_sample_candles(symbol, interval, count) if demo else fetch_recent_candles(
+            symbol, interval, count, fallback_to_sample=False
+        )
+        closes = series.close_prices
+        minimum, maximum = min(closes), max(closes)
+        normalized = [(value - minimum) / (maximum - minimum) if maximum != minimum else 0.5 for value in closes]
+        first, latest = closes[0], closes[-1]
+        change = latest - first
+        change_percent = (change / first * 100.0) if first else 0.0
+        name, default_currency = STOCK_NAMES.get(series.symbol, (series.symbol, "KRW"))
+        candle_currency = default_currency
+        return {
+            "symbol": series.symbol,
+            "name": name,
+            "currency": candle_currency,
+            "interval": series.interval,
+            "source": series.source,
+            "candles": [candle.__dict__ for candle in series.candles],
+            "close_prices": closes,
+            "volumes": [candle.volume for candle in series.candles],
+            "metrics": {
+                "latest": latest,
+                "change": change,
+                "change_percent": change_percent,
+                "high": maximum,
+                "low": minimum,
+                "latest_timestamp": series.candles[-1].timestamp,
+            },
+            "analysis": engine.analyze_timeseries(normalized),
+        }
+    except (ValueError, StockDataError) as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=503)
+
+
 @app.post("/sonify-data")
 async def sonify_data(req: SoundRequest):
-    resampled_data = resample_data(req.data, config.TOTAL_PLAY_TIME, config.SAMPLE_RATE)
-    audio_vf = engine.generate_stereo_sound(resampled_data, req.max_freq, req.waveform)
-    return StreamingResponse(audio_vf, media_type="audio/wav")
+    try:
+        resampled_data = resample_data(req.data, config.TOTAL_PLAY_TIME, config.SAMPLE_RATE)
+        audio_vf = engine.generate_stereo_sound(resampled_data, req.max_freq, req.waveform)
+        return StreamingResponse(audio_vf, media_type="audio/wav")
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=422)
 
 
-@app.post("/mix-data")
-async def mix_data(req: MixRequest):
-    resampled_data_list = [resample_data(d, config.TOTAL_PLAY_TIME, config.SAMPLE_RATE) for d in req.data_list]
-    max_freq_list = [req.max_freq] * len(resampled_data_list)
-    audio_vf = engine.generate_mixed_sound(resampled_data_list, max_freq_list, req.waveform_list)
-    return StreamingResponse(audio_vf, media_type="audio/wav")
+@app.post("/sonify-spatial")
+async def sonify_spatial(req: SpatialSoundRequest):
+    """Sonify aligned primary and supporting time-series data."""
+    if req.volumes is not None and len(req.prices) != len(req.volumes):
+        return JSONResponse(
+            {"detail": "prices and volumes must have the same length"}, status_code=422
+        )
+    if req.timestamps is not None and len(req.prices) != len(req.timestamps):
+        return JSONResponse(
+            {"detail": "prices and timestamps must have the same length"}, status_code=422
+        )
+    try:
+        audio_vf = generate_spatial_audio(
+            req.prices,
+            req.volumes,
+            min_frequency=req.min_frequency,
+            max_frequency=req.max_frequency,
+            min_amplitude=req.min_amplitude,
+            max_amplitude=req.max_amplitude,
+            duration_seconds=req.duration_seconds,
+            waveform_type=req.waveform,
+        )
+        return StreamingResponse(
+            audio_vf,
+            media_type="audio/wav",
+            headers={"X-Data-Points": str(len(req.prices))},
+        )
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=422)
 
 
 @app.post("/analyze-graph-image")

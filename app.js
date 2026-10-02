@@ -1,4 +1,4 @@
-const SERVER_URL = "http://127.0.0.1:8000";
+const SERVER_URL = "http://127.0.0.1:8001";
 
 // 전역 변수
 let selectedImageFile = null,
@@ -7,10 +7,25 @@ let selectedImageFile = null,
     dragStart = null;
 let extractedGraphData = [],
     extractedPoints = [],
-    csvData = [],
-    mixCandidates = [],
-    chartInstance = null,
-    voices = [];
+    stockData = [],
+    stockCandles = [],
+    currentStockPayload = null,
+    stockVolumes = [],
+    voices = [],
+    stockChartInstance = null;
+const rankingNameBySymbol = new Map();
+const rankingSymbolByName = new Map();
+const rankingFilters = { type: "MARKET_TRADING_AMOUNT", marketCountry: "KR", duration: "realtime" };
+let rankingRequestId = 0;
+
+let activeSeries = null,
+    playbackSpeed = 1,
+    spatialAudioUrl = null,
+    pendingSeekIndex = null,
+    speechRequestId = 0;
+
+const BASE_PLAYBACK_SECONDS = 8;
+const SPEED_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 // DOM 요소
 const canvas = document.getElementById("imageCanvas"),
@@ -34,9 +49,443 @@ document.getElementById("freqSlider").addEventListener("input", e => {
     document.getElementById("freqVal").innerText = e.target.value;
 });
 
+document.getElementById("minFreqSlider").addEventListener("input", e => {
+    document.getElementById("minFreqVal").innerText = e.target.value;
+});
+
+document.getElementById("minAmplitudeSlider").addEventListener("input", e => {
+    document.getElementById("minAmplitudeVal").innerText = Math.round(Number(e.target.value) * 100);
+});
+
+document.getElementById("maxAmplitudeSlider").addEventListener("input", e => {
+    document.getElementById("maxAmplitudeVal").innerText = Math.round(Number(e.target.value) * 100);
+});
+
+document.getElementById("masterVolumeSlider").addEventListener("input", e => {
+    document.getElementById("masterVolumeVal").innerText = Math.round(Number(e.target.value) * 100);
+    document.getElementById("spatialAudio").volume = Number(e.target.value);
+});
+
+["minFreqSlider", "freqSlider", "minAmplitudeSlider", "maxAmplitudeSlider"].forEach(id => {
+    document.getElementById(id).addEventListener("change", () => {
+        if (activeSeries) rebuildActiveAudio(true).catch(error => {
+            document.getElementById("playbackState").innerText = error.message;
+        });
+    });
+});
+
 document.getElementById("waveSelect").addEventListener("change", () => {
     if (extractedGraphData.length > 0) prepareGraphAudio();
+    if (activeSeries) rebuildActiveAudio(true);
 });
+
+const STOCK_SYMBOLS = {
+    "삼성전자": "005930", "005930": "005930",
+    "sk하이닉스": "000660", "000660": "000660",
+    "naver": "035420", "035420": "035420",
+    "카카오": "035720", "035720": "035720",
+    "lg화학": "051910", "051910": "051910",
+    "애플": "AAPL", "aapl": "AAPL",
+    "마이크로소프트": "MSFT", "msft": "MSFT",
+    "엔비디아": "NVDA", "nvda": "NVDA",
+    "테슬라": "TSLA", "tsla": "TSLA"
+};
+
+document.getElementById("loadStockBtn").addEventListener("click", () => loadStockData(false));
+document.getElementById("loadDemoBtn").addEventListener("click", () => loadStockData(true));
+document.getElementById("readStockBtn").addEventListener("click", readStockSummary);
+document.getElementById("refreshRankingsBtn").addEventListener("click", loadStockRankings);
+document.querySelectorAll(".market-tab").forEach(button => {
+    button.addEventListener("click", () => {
+        rankingFilters.marketCountry = button.dataset.market;
+        setActiveRankingButtons(".market-tab", "market", rankingFilters.marketCountry);
+        loadStockRankings();
+    });
+});
+document.querySelectorAll(".ranking-tab").forEach(button => {
+    button.addEventListener("click", () => {
+        rankingFilters.type = button.dataset.rankingType;
+        setActiveRankingButtons(".ranking-tab", "rankingType", rankingFilters.type);
+        loadStockRankings();
+    });
+});
+document.getElementById("rankingDuration").addEventListener("change", event => {
+    rankingFilters.duration = event.target.value;
+    loadStockRankings();
+});
+
+function setActiveRankingButtons(selector, dataKey, value) {
+    document.querySelectorAll(selector).forEach(button => {
+        const active = button.dataset[dataKey] === value;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-pressed", String(active));
+    });
+}
+
+function formatRankingMetric(item, rankingType) {
+    if (rankingType.includes("TRADING_VOLUME")) {
+        return `거래량 ${new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 }).format(item.trading_volume)}주`;
+    }
+    return `거래대금 ${new Intl.NumberFormat("ko-KR", {
+        style: "currency", currency: item.currency, notation: "compact", maximumFractionDigits: 1
+    }).format(item.trading_amount)}`;
+}
+
+function renderStockRankings(payload) {
+    const list = document.getElementById("rankingList");
+    const suggestions = document.getElementById("stockSuggestions");
+    list.replaceChildren();
+    suggestions.querySelectorAll("option[data-ranking]").forEach(option => option.remove());
+    payload.rankings.forEach(item => {
+        rankingNameBySymbol.set(item.symbol, { name: item.name, currency: item.currency });
+        rankingSymbolByName.set(item.name.toLowerCase(), item.symbol);
+        const option = document.createElement("option");
+        option.value = item.name;
+        option.label = item.symbol;
+        option.dataset.ranking = "true";
+        suggestions.appendChild(option);
+
+        const row = document.createElement("li");
+        const button = document.createElement("button");
+        const sign = item.change_percent > 0 ? "+" : "";
+        const changeText = `${sign}${item.change_percent.toFixed(2)}%`;
+        button.type = "button";
+        button.className = "ranking-item";
+        button.dataset.symbol = item.symbol;
+        button.setAttribute("aria-label", `${item.rank}위 ${item.name}, 현재가 ${formatPrice(item.last_price, item.currency)}, 등락률 ${changeText}, ${formatRankingMetric(item, payload.type)}. 차트 조회`);
+
+        const rank = document.createElement("strong");
+        rank.className = "ranking-rank";
+        rank.innerText = `${item.rank}위`;
+        const identity = document.createElement("span");
+        identity.className = "ranking-identity";
+        const name = document.createElement("strong");
+        name.innerText = item.name;
+        const symbol = document.createElement("small");
+        symbol.innerText = item.symbol;
+        identity.append(name, symbol);
+        const priceText = document.createElement("strong");
+        priceText.className = "ranking-price";
+        priceText.innerText = formatPrice(item.last_price, item.currency);
+        const change = document.createElement("strong");
+        change.className = `ranking-change ${item.change_percent > 0 ? "up" : item.change_percent < 0 ? "down" : ""}`;
+        change.innerText = changeText;
+        const metric = document.createElement("span");
+        metric.className = "ranking-metric";
+        metric.innerText = formatRankingMetric(item, payload.type);
+        button.append(rank, identity, priceText, change, metric);
+        button.addEventListener("click", async () => {
+            list.querySelectorAll(".ranking-item").forEach(other => other.removeAttribute("aria-current"));
+            button.setAttribute("aria-current", "true");
+            document.getElementById("stockSearch").value = item.symbol;
+            document.getElementById("rankingStatus").innerText = `${item.name} 종목을 선택했습니다. 차트를 불러오는 중입니다.`;
+            await loadStockData(false);
+            if (currentStockPayload?.symbol === item.symbol) {
+                document.getElementById("stockResults").scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+        });
+        button.addEventListener("keydown", event => {
+            const buttons = [...list.querySelectorAll(".ranking-item")];
+            const index = buttons.indexOf(button);
+            let targetIndex = null;
+            if (event.key === "ArrowDown") targetIndex = Math.min(buttons.length - 1, index + 1);
+            if (event.key === "ArrowUp") targetIndex = Math.max(0, index - 1);
+            if (event.key === "Home") targetIndex = 0;
+            if (event.key === "End") targetIndex = buttons.length - 1;
+            if (targetIndex !== null) {
+                event.preventDefault();
+                event.stopPropagation();
+                buttons[targetIndex].focus();
+            }
+        });
+        row.appendChild(button);
+        list.appendChild(row);
+    });
+}
+
+async function loadStockRankings() {
+    const durationSelect = document.getElementById("rankingDuration");
+    const status = document.getElementById("rankingStatus");
+    const browser = document.querySelector(".ranking-browser");
+    const refreshButton = document.getElementById("refreshRankingsBtn");
+    const requestId = ++rankingRequestId;
+    const type = rankingFilters.type;
+    const marketCountry = rankingFilters.marketCountry;
+    let duration = rankingFilters.duration;
+    let durationNotice = "";
+    if (["TOP_GAINERS", "TOP_LOSERS"].includes(type) && duration === "realtime") {
+        duration = "1d";
+        rankingFilters.duration = duration;
+        durationSelect.value = "1d";
+        durationNotice = "급등락 순위는 실시간 산정을 지원하지 않아 1일 기준으로 변경했습니다. ";
+    }
+    document.getElementById("rankingMetricHeading").innerText = type.includes("TRADING_VOLUME") ? "거래량" : "거래대금";
+    status.innerText = `${durationNotice}종목 순위를 불러오는 중입니다.`;
+    browser.setAttribute("aria-busy", "true");
+    refreshButton.disabled = true;
+    try {
+        const params = new URLSearchParams({ type, market_country: marketCountry, duration, count: "10" });
+        const response = await fetch(`${SERVER_URL}/stock-rankings?${params}`);
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "종목 순위를 불러오지 못했습니다.");
+        if (requestId !== rankingRequestId) return;
+        renderStockRankings(payload);
+        const rankedAt = payload.ranked_at ? formatTimestamp(payload.ranked_at) : "집계 시각 없음";
+        status.innerText = payload.rankings.length
+            ? `${durationNotice}${rankedAt} 기준 상위 ${payload.rankings.length}개 종목입니다.`
+            : `${durationNotice}현재 조건에 집계된 종목이 없습니다.`;
+    } catch (error) {
+        if (requestId !== rankingRequestId) return;
+        document.getElementById("rankingList").replaceChildren();
+        status.innerText = `${error.message} 종목명이나 코드를 직접 입력할 수도 있습니다.`;
+    } finally {
+        if (requestId === rankingRequestId) {
+            browser.setAttribute("aria-busy", "false");
+            refreshButton.disabled = false;
+        }
+    }
+}
+
+loadStockRankings();
+
+async function loadStockData(demo = false) {
+    const query = document.getElementById("stockSearch").value.trim();
+    const symbol = STOCK_SYMBOLS[query.toLowerCase()] || STOCK_SYMBOLS[query] || rankingSymbolByName.get(query.toLowerCase()) || query.toUpperCase();
+    const interval = document.getElementById("stockInterval").value;
+    const count = Number(document.getElementById("stockCount").value);
+    const status = document.getElementById("stockStatus");
+    const button = document.getElementById("loadStockBtn");
+    if (!symbol) {
+        status.innerText = "종목명이나 종목 코드를 입력하세요.";
+        document.getElementById("stockSearch").focus();
+        return;
+    }
+    status.innerText = demo ? "샘플 데이터를 준비하는 중입니다." : "토스증권에서 실시간 데이터를 불러오는 중입니다.";
+    button.disabled = true;
+    document.getElementById("loadDemoBtn").disabled = true;
+    try {
+        const params = new URLSearchParams({ symbol, interval, count: String(count), demo: String(demo) });
+        const response = await fetch(`${SERVER_URL}/stock-candles?${params}`);
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "주식 데이터를 불러오지 못했습니다.");
+        const rankingMetadata = rankingNameBySymbol.get(payload.symbol);
+        if (rankingMetadata) {
+            payload.name = rankingMetadata.name;
+            payload.currency = rankingMetadata.currency;
+        }
+        currentStockPayload = payload;
+        stockData = payload.close_prices || [];
+        stockCandles = payload.candles || [];
+        stockVolumes = payload.volumes || stockCandles.map(candle => candle.volume);
+        renderStockSummary(payload);
+        document.getElementById("stockResults").hidden = false;
+        const source = document.getElementById("stockSource");
+        source.innerText = payload.source === "tossinvest" ? "토스증권 실데이터" : "샘플 체험 데이터";
+        source.className = `source-badge ${payload.source === "tossinvest" ? "live" : "demo"}`;
+        document.getElementById("stockSummary").innerText = payload.analysis?.summary || "흐름 설명이 없습니다.";
+        renderStockChart(stockCandles, payload.name, payload.currency);
+        await prepareStockAudio();
+        status.innerText = `${payload.name}, ${stockData.length}개 봉을 불러왔습니다. 핵심 정보부터 확인하세요.`;
+    } catch (error) {
+        currentStockPayload = null;
+        stockData = [];
+        stockCandles = [];
+        stockVolumes = [];
+        document.getElementById("stockResults").hidden = true;
+        const source = document.getElementById("stockSource");
+        source.innerText = "실데이터 연결 실패";
+        source.className = "source-badge error";
+        status.innerText = `${error.message} 샘플로 체험하려면 '샘플로 체험' 버튼을 누르세요.`;
+    } finally {
+        button.disabled = false;
+        document.getElementById("loadDemoBtn").disabled = false;
+    }
+}
+
+function formatPrice(value, currency) {
+    return new Intl.NumberFormat("ko-KR", {
+        style: "currency", currency, maximumFractionDigits: currency === "KRW" ? 0 : 2
+    }).format(value);
+}
+
+function renderStockSummary(payload) {
+    const { metrics, currency } = payload;
+    const sign = metrics.change > 0 ? "+" : "";
+    document.getElementById("stockName").innerText = `${payload.name} (${payload.symbol})`;
+    document.getElementById("metricLatest").innerText = formatPrice(metrics.latest, currency);
+    document.getElementById("metricChange").innerText = `${sign}${formatPrice(metrics.change, currency)} (${sign}${metrics.change_percent.toFixed(2)}%)`;
+    document.getElementById("metricChange").className = metrics.change > 0 ? "up" : metrics.change < 0 ? "down" : "";
+    document.getElementById("metricHigh").innerText = formatPrice(metrics.high, currency);
+    document.getElementById("metricLow").innerText = formatPrice(metrics.low, currency);
+    document.getElementById("stockTimestamp").innerText = `최근 봉 시각: ${formatTimestamp(metrics.latest_timestamp)}`;
+}
+
+function formatTimestamp(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function readStockSummary() {
+    if (!currentStockPayload) return;
+    const text = `${document.getElementById("stockName").innerText}. 최근 종가 ${document.getElementById("metricLatest").innerText}. 조회 구간 변화 ${document.getElementById("metricChange").innerText}. ${document.getElementById("stockSummary").innerText}`;
+    speakText(text);
+}
+
+function calculateMovingAverage(candles, period) {
+    return candles.map((candle, index) => {
+        if (index < period - 1) return { x: new Date(candle.timestamp).getTime(), y: null };
+        const window = candles.slice(index - period + 1, index + 1);
+        const average = window.reduce((sum, item) => sum + Number(item.close), 0) / period;
+        return { x: new Date(candle.timestamp).getTime(), y: average };
+    });
+}
+
+function renderStockChart(candles, name, currency) {
+    if (stockChartInstance) stockChartInstance.destroy();
+    const upColor = "#ef4444";
+    const downColor = "#2563eb";
+    const unchangedColor = "#64748b";
+    const candleData = candles.map(candle => ({
+        x: new Date(candle.timestamp).getTime(),
+        o: Number(candle.open),
+        h: Number(candle.high),
+        l: Number(candle.low),
+        c: Number(candle.close)
+    }));
+    const volumeData = candles.map(candle => ({
+        x: new Date(candle.timestamp).getTime(),
+        y: Number(candle.volume) || 0
+    }));
+    const volumeColors = candles.map(candle => Number(candle.close) > Number(candle.open)
+        ? upColor : Number(candle.close) < Number(candle.open) ? downColor : unchangedColor);
+    stockChartInstance = new Chart(document.getElementById("stockChart"), {
+        type: "candlestick",
+        data: {
+            datasets: [
+                {
+                    type: "candlestick",
+                    label: `${name} 캔들`,
+                    data: candleData,
+                    yAxisID: "priceAxis",
+                    backgroundColors: { up: upColor, down: downColor, unchanged: unchangedColor },
+                    borderColors: { up: upColor, down: downColor, unchanged: unchangedColor },
+                    order: 2
+                },
+                {
+                    type: "line",
+                    label: "5봉 이동평균",
+                    data: calculateMovingAverage(candles, 5),
+                    yAxisID: "priceAxis",
+                    borderColor: "#10b981",
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    tension: .18,
+                    spanGaps: false,
+                    order: 1
+                },
+                {
+                    type: "line",
+                    label: "20봉 이동평균",
+                    data: calculateMovingAverage(candles, 20),
+                    yAxisID: "priceAxis",
+                    borderColor: "#f59e0b",
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    tension: .18,
+                    spanGaps: false,
+                    order: 1
+                },
+                {
+                    type: "bar",
+                    label: "거래량",
+                    data: volumeData,
+                    yAxisID: "volumeAxis",
+                    backgroundColor: volumeColors,
+                    borderWidth: 0,
+                    barPercentage: .82,
+                    categoryPercentage: .92,
+                    order: 3
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: {
+                legend: { display: true, position: "top", align: "start" },
+                tooltip: {
+                    callbacks: {
+                        label(context) {
+                            const raw = context.raw || {};
+                            if (context.dataset.type === "candlestick") {
+                                return [
+                                    `시가 ${formatPrice(raw.o, currency)}`,
+                                    `고가 ${formatPrice(raw.h, currency)}`,
+                                    `저가 ${formatPrice(raw.l, currency)}`,
+                                    `종가 ${formatPrice(raw.c, currency)}`
+                                ];
+                            }
+                            if (context.dataset.label === "거래량") {
+                                return `거래량 ${new Intl.NumberFormat("ko-KR").format(raw.y)}`;
+                            }
+                            return `${context.dataset.label} ${formatPrice(raw.y, currency)}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    type: "timeseries",
+                    offset: true,
+                    time: { tooltipFormat: "yyyy. LL. dd. HH:mm" },
+                    ticks: { source: "auto", maxRotation: 0, autoSkip: true },
+                    grid: { color: "rgba(148, 163, 184, .18)" }
+                },
+                priceAxis: {
+                    type: "linear",
+                    position: "right",
+                    stack: "stock",
+                    stackWeight: 3,
+                    title: { display: true, text: "가격 · Pitch" },
+                    grid: { color: "rgba(148, 163, 184, .24)" }
+                },
+                volumeAxis: {
+                    type: "linear",
+                    position: "right",
+                    stack: "stock",
+                    stackWeight: 1,
+                    beginAtZero: true,
+                    title: { display: true, text: "거래량 · Volume" },
+                    grid: { color: "rgba(148, 163, 184, .14)" },
+                    ticks: {
+                        callback(value) {
+                            return Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+async function prepareStockAudio() {
+    if (!stockData.length) return;
+    const usableVolumes = stockVolumes.length === stockData.length && stockVolumes.every(value => Number.isFinite(Number(value)))
+        ? stockVolumes.map(Number) : null;
+    await activateSeries({
+        label: `${currentStockPayload.name} 종가와 거래량`,
+        source: "stock",
+        timestamps: stockCandles.map(candle => candle.timestamp),
+        prices: stockData.map(Number),
+        volumes: usableVolumes,
+        candles: stockCandles,
+        priceLabel: "종가",
+        volumeLabel: "거래량",
+        currency: currentStockPayload.currency
+    });
+}
 
 function setStatus(text) {
     document.getElementById("imageStatus").innerText = text;
@@ -282,21 +731,237 @@ async function requestAudio(data, waveform) {
     return await res.blob();
 }
 
+function getSpatialSettings() {
+    const settings = {
+        min_frequency: Number(document.getElementById("minFreqSlider").value),
+        max_frequency: Number(document.getElementById("freqSlider").value),
+        min_amplitude: Number(document.getElementById("minAmplitudeSlider").value),
+        max_amplitude: Number(document.getElementById("maxAmplitudeSlider").value),
+        duration_seconds: BASE_PLAYBACK_SECONDS / playbackSpeed,
+        waveform: document.getElementById("waveSelect").value
+    };
+    if (settings.max_frequency <= settings.min_frequency) {
+        throw new Error("최대 음높이는 최소 음높이보다 커야 합니다.");
+    }
+    if (settings.max_amplitude <= settings.min_amplitude) {
+        throw new Error("최대 음량은 최소 음량보다 커야 합니다.");
+    }
+    return settings;
+}
+
+async function requestSpatialAudio(series) {
+    const payload = {
+        prices: series.prices,
+        volumes: series.volumes,
+        timestamps: series.timestamps,
+        ...getSpatialSettings()
+    };
+    const response = await fetch(`${SERVER_URL}/sonify-spatial`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || "공간음향 생성에 실패했습니다.");
+    }
+    return response.blob();
+}
+
+async function activateSeries(series) {
+    if (!series || series.prices.length < 2) throw new Error("두 개 이상의 데이터가 필요합니다.");
+    activeSeries = series;
+    const slider = document.getElementById("positionSlider");
+    slider.max = String(series.prices.length - 1);
+    slider.value = "0";
+    slider.disabled = false;
+    document.getElementById("activeSeriesLabel").innerText = `${series.label}, ${series.prices.length}개 시점`;
+    setPlayerControlsDisabled(false);
+    renderActivePoint(0);
+    await rebuildActiveAudio(false);
+}
+
+async function rebuildActiveAudio(preservePosition = true) {
+    if (!activeSeries) return;
+    const audio = document.getElementById("spatialAudio");
+    const progress = preservePosition && Number.isFinite(audio.duration) && audio.duration > 0
+        ? audio.currentTime / audio.duration : 0;
+    document.getElementById("playbackState").innerText = "공간음향 생성 중";
+    setPlayerControlsDisabled(true);
+    try {
+        const blob = await requestSpatialAudio(activeSeries);
+        if (spatialAudioUrl) URL.revokeObjectURL(spatialAudioUrl);
+        spatialAudioUrl = URL.createObjectURL(blob);
+        audio.src = spatialAudioUrl;
+        audio.volume = Number(document.getElementById("masterVolumeSlider").value);
+        pendingSeekIndex = Math.round(progress * (activeSeries.prices.length - 1));
+        audio.load();
+        document.getElementById("playbackState").innerText = "재생 준비 완료";
+    } catch (error) {
+        document.getElementById("playbackState").innerText = error.message;
+        throw error;
+    } finally {
+        setPlayerControlsDisabled(false);
+    }
+}
+
+function setPlayerControlsDisabled(disabled) {
+    ["playPauseBtn", "restartBtn", "previousSegmentBtn", "nextSegmentBtn", "slowerBtn", "fasterBtn", "announcePositionBtn"].forEach(id => {
+        document.getElementById(id).disabled = disabled || !activeSeries;
+    });
+}
+
+function playPauseActiveAudio() {
+    const audio = document.getElementById("spatialAudio");
+    if (!audio.src) return;
+    cancelSpeech();
+    if (audio.paused) audio.play();
+    else audio.pause();
+}
+
+function restartActiveAudio() {
+    const audio = document.getElementById("spatialAudio");
+    if (!audio.src) return;
+    audio.currentTime = 0;
+    document.getElementById("positionSlider").value = "0";
+    renderActivePoint(0);
+    audio.play();
+}
+
+function seekToIndex(index, announce = false) {
+    if (!activeSeries) return;
+    const bounded = Math.max(0, Math.min(activeSeries.prices.length - 1, Number(index)));
+    const slider = document.getElementById("positionSlider");
+    slider.value = String(bounded);
+    const audio = document.getElementById("spatialAudio");
+    if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        audio.currentTime = bounded / Math.max(1, activeSeries.prices.length - 1) * audio.duration;
+    } else {
+        pendingSeekIndex = bounded;
+    }
+    renderActivePoint(bounded);
+    if (announce) announceCurrentPosition();
+}
+
+function moveActiveSegment(direction) {
+    if (!activeSeries) return;
+    const step = Math.max(1, Math.ceil(activeSeries.prices.length / 10));
+    const current = Number(document.getElementById("positionSlider").value);
+    seekToIndex(current + direction * step, true);
+}
+
+async function changePlaybackSpeed(direction) {
+    const current = SPEED_STEPS.indexOf(playbackSpeed);
+    const next = Math.max(0, Math.min(SPEED_STEPS.length - 1, current + direction));
+    if (next === current) return;
+    playbackSpeed = SPEED_STEPS[next];
+    document.getElementById("speedState").innerText = `속도 ${playbackSpeed}배`;
+    await rebuildActiveAudio(true);
+    speakText(`재생 속도 ${playbackSpeed}배`);
+}
+
+function formatActivePrice(value) {
+    if (activeSeries?.currency) return formatPrice(value, activeSeries.currency);
+    return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 3 }).format(value);
+}
+
+function renderActivePoint(index) {
+    if (!activeSeries) return;
+    const bounded = Math.max(0, Math.min(activeSeries.prices.length - 1, Number(index)));
+    const percentage = activeSeries.prices.length > 1
+        ? Math.round(bounded / (activeSeries.prices.length - 1) * 100) : 100;
+    const timestamp = activeSeries.timestamps?.[bounded] ?? `${bounded + 1}번째 시점`;
+    const formatVolume = value => Number.isFinite(Number(value))
+        ? new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(value)
+        : "정보 없음";
+    const volume = activeSeries.volumes ? formatVolume(activeSeries.volumes[bounded]) : "사용하지 않음";
+    const candle = activeSeries.source === "stock" ? activeSeries.candles?.[bounded] : null;
+    const detail = candle
+        ? `${formatTimestamp(timestamp)}. 시가 ${formatActivePrice(candle.open)}, 고가 ${formatActivePrice(candle.high)}, 저가 ${formatActivePrice(candle.low)}, 종가 ${formatActivePrice(candle.close)}, 거래량 ${formatVolume(candle.volume)}.`
+        : `${formatTimestamp(timestamp)}. ${activeSeries.priceLabel || "주 데이터"} ${formatActivePrice(activeSeries.prices[bounded])}. ${activeSeries.volumeLabel || "보조 데이터"} ${volume}.`;
+    document.getElementById("currentPosition").innerText = `전체의 ${percentage}% · ${bounded + 1}/${activeSeries.prices.length}`;
+    document.getElementById("currentPointDetail").innerText = detail;
+    document.getElementById("positionSlider").setAttribute(
+        "aria-valuetext",
+        `전체의 ${percentage}퍼센트, ${detail}`
+    );
+}
+
+function announceCurrentPosition() {
+    if (!activeSeries) return;
+    const index = Number(document.getElementById("positionSlider").value);
+    const percentage = activeSeries.prices.length > 1
+        ? Math.round(index / (activeSeries.prices.length - 1) * 100) : 100;
+    speakText(`현재 전체의 ${percentage}퍼센트 지점입니다. ${document.getElementById("currentPointDetail").innerText} 재생 속도 ${playbackSpeed}배입니다.`);
+}
+
+function cancelSpeech() {
+    speechRequestId += 1;
+    window.speechSynthesis.cancel();
+}
+
+function speakText(text) {
+    const requestId = ++speechRequestId;
+    const playingAudios = Array.from(document.querySelectorAll("audio"))
+        .filter(audio => !audio.paused && !audio.ended);
+    playingAudios.forEach(audio => audio.pause());
+    window.speechSynthesis.cancel();
+    const message = new SpeechSynthesisUtterance(text);
+    message.lang = "ko-KR";
+    message.rate = 1;
+    const koreanVoice = voices.find(voice => voice.lang.includes("ko"));
+    if (koreanVoice) message.voice = koreanVoice;
+    message.onend = () => {
+        if (requestId !== speechRequestId) return;
+        playingAudios.forEach(audio => audio.play().catch(() => {}));
+    };
+    window.speechSynthesis.speak(message);
+}
+
+const spatialAudio = document.getElementById("spatialAudio");
+spatialAudio.volume = Number(document.getElementById("masterVolumeSlider").value);
+spatialAudio.addEventListener("loadedmetadata", () => {
+    if (pendingSeekIndex !== null) {
+        seekToIndex(pendingSeekIndex, false);
+        pendingSeekIndex = null;
+    }
+});
+spatialAudio.addEventListener("play", () => {
+    document.getElementById("playbackState").innerText = "재생 중";
+    document.getElementById("playPauseBtn").innerText = "일시정지";
+});
+spatialAudio.addEventListener("pause", () => {
+    document.getElementById("playbackState").innerText = spatialAudio.ended ? "재생 완료" : "일시정지";
+    document.getElementById("playPauseBtn").innerText = "재생";
+});
+spatialAudio.addEventListener("ended", () => {
+    document.getElementById("playbackState").innerText = "재생 완료";
+    document.getElementById("playPauseBtn").innerText = "재생";
+});
+spatialAudio.addEventListener("timeupdate", () => {
+    if (!activeSeries || !Number.isFinite(spatialAudio.duration) || spatialAudio.duration <= 0) return;
+    const progress = Math.min(1, spatialAudio.currentTime / spatialAudio.duration);
+    const index = Math.round(progress * (activeSeries.prices.length - 1));
+    document.getElementById("positionSlider").value = String(index);
+    renderActivePoint(index);
+});
+
+document.getElementById("playPauseBtn").addEventListener("click", playPauseActiveAudio);
+document.getElementById("restartBtn").addEventListener("click", restartActiveAudio);
+document.getElementById("previousSegmentBtn").addEventListener("click", () => moveActiveSegment(-1));
+document.getElementById("nextSegmentBtn").addEventListener("click", () => moveActiveSegment(1));
+document.getElementById("slowerBtn").addEventListener("click", () => changePlaybackSpeed(-1));
+document.getElementById("fasterBtn").addEventListener("click", () => changePlaybackSpeed(1));
+document.getElementById("announcePositionBtn").addEventListener("click", announceCurrentPosition);
+document.getElementById("positionSlider").addEventListener("input", event => seekToIndex(Number(event.target.value), false));
+
 // TTS 설명 읽기
 function readGraphDescription() {
-    stopAllAudio();
-    const msg = new SpeechSynthesisUtterance(document.getElementById("graphSummary").innerText);
-    msg.lang = "ko-KR";
-    msg.rate = 1.05;
-    
-    const ko = voices.find(v => v.lang.includes("ko"));
-    if (ko) msg.voice = ko;
-    
-    window.speechSynthesis.speak(msg);
+    speakText(document.getElementById("graphSummary").innerText);
 }
 
 function stopAllAudio() {
-    window.speechSynthesis.cancel();
+    cancelSpeech();
     document.querySelectorAll("audio").forEach(a => {
         a.pause();
         a.currentTime = 0;
@@ -309,152 +974,90 @@ function playAudio(id) {
     if (a && a.src) a.play();
 }
 
-// ==========================================
-// CSV 개발 및 검증용 기능
-// ==========================================
-document.getElementById("csvInput").addEventListener("change", e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    
-    Papa.parse(file, {
-        header: true,
-        dynamicTyping: true,
-        skipEmptyLines: true,
-        complete: r => processCSV(r.data)
-    });
-});
-
-function processCSV(rows) {
-    if (!rows.length) return alert("CSV 데이터가 없습니다.");
-    
-    const columns = Object.keys(rows[0]);
-    const keys = ["time", "date", "index", "year", "month", "day", "시간", "날짜", "연도"];
-    
-    let labels = rows.map((_, i) => i + 1);
-    let dataColumns = [...columns];
-    
-    if (keys.some(k => columns[0].toLowerCase().includes(k))) {
-        labels = rows.map(row => row[columns[0]]);
-        dataColumns = columns.slice(1);
-    }
-    
-    csvData = dataColumns.map(column => {
-        const raw = rows.map(row => Number(row[column])).filter(Number.isFinite);
-        if (!raw.length) return null;
-        
-        const min = Math.min(...raw);
-        const max = Math.max(...raw);
-        const scaled = raw.map(v => max !== min ? (v - min) / (max - min) : .5);
-        
-        return { name: column, raw, scaled, min, max };
-    }).filter(Boolean);
-    
-    drawCsvChart(labels, csvData);
-    renderCsvResults();
-}
-
-function drawCsvChart(labels, datasets) {
-    const el = document.getElementById("lineChart");
-    if (chartInstance) chartInstance.destroy();
-    
-    chartInstance = new Chart(el, {
-        type: "line",
-        data: {
-            labels,
-            datasets: datasets.map((d, i) => ({
-                label: d.name,
-                data: d.scaled,
-                borderColor: `hsl(${i * 97 % 360}, 72%, 42%)`,
-                borderWidth: 2,
-                pointRadius: 2,
-                tension: .15
-            }))
-        },
-        options: {
-            responsive: true,
-            scales: {
-                y: { min: 0, max: 1, ticks: { display: false } }
-            }
-        }
-    });
-}
-
-function renderCsvResults() {
-    const container = document.getElementById("csvResults");
-    container.innerHTML = "";
-    document.getElementById("mixPanel").hidden = csvData.length === 0;
-    
-    csvData.forEach((d, i) => {
-        const card = document.createElement("article");
-        card.className = "data-card";
-        card.innerHTML = `
-            <div>
-                <h3>${d.name}</h3>
-                <p>원본 최소 ${d.min.toFixed(2)}, 원본 최대 ${d.max.toFixed(2)}</p>
-            </div>
-            <div class="card-actions">
-                <label><input type="checkbox" id="mixCheck_${i}"> 믹싱 포함</label>
-                <button class="btn-secondary" type="button" id="csvPlay_${i}">재생</button>
-                <audio id="csvAudio_${i}" controls></audio>
-            </div>
-        `;
-        container.appendChild(card);
-        
-        document.getElementById(`csvPlay_${i}`).addEventListener("click", async () => {
-            const blob = await requestAudio(d.scaled, "sine");
-            const audio = document.getElementById(`csvAudio_${i}`);
-            audio.src = URL.createObjectURL(blob);
-            playAudio(`csvAudio_${i}`);
-        });
-        
-        document.getElementById(`mixCheck_${i}`).addEventListener("change", updateMixCandidates);
-    });
-    updateMixCandidates();
-}
-
-function updateMixCandidates() {
-    mixCandidates = csvData.filter((_, i) => {
-        const c = document.getElementById(`mixCheck_${i}`);
-        return c && c.checked;
-    });
-    
-    document.getElementById("mixListText").innerText = mixCandidates.length 
-        ? `선택된 데이터: ${mixCandidates.map(i => i.name).join(", ")}` 
-        : "선택된 데이터가 없습니다.";
-}
-
-document.getElementById("mixBtn").addEventListener("click", async () => {
-    if (!mixCandidates.length) return alert("믹싱할 데이터를 선택해 주세요.");
-    
-    const payload = {
-        data_list: mixCandidates.map(i => i.scaled),
-        max_freq: Number(document.getElementById("freqSlider").value),
-        waveform_list: mixCandidates.map(() => "sine")
-    };
-    
-    const res = await fetch(`${SERVER_URL}/mix-data`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-    });
-    
-    const blob = await res.blob();
-    const audio = document.getElementById("mixAudio");
-    audio.src = URL.createObjectURL(blob);
-    playAudio("mixAudio");
-});
-
-// 단축키 설정
+// 중앙 Shortcut Map. 입력 요소를 조작하는 동안에는 전역 단축키를 실행하지 않는다.
 document.addEventListener("keydown", e => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === "Escape") stopAllAudio();
+    const isTyping = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
+    if (e.key === "/" && !isTyping) {
+        e.preventDefault();
+        document.getElementById("stockSearch").focus();
+        document.getElementById("stockSearch").select();
+        return;
+    }
+    if (e.key.toLowerCase() === "g" && !isTyping) {
+        e.preventDefault();
+        const firstRanking = document.querySelector(".ranking-item");
+        (firstRanking || document.getElementById("rankingHeading")).focus();
+        return;
+    }
+    if (e.key.toLowerCase() === "l" && !isTyping) {
+        loadStockData(false);
+        return;
+    }
+    if (isTyping) return;
+    if (e.key === " " && activeSeries) {
+        e.preventDefault();
+        playPauseActiveAudio();
+        return;
+    }
+    if (e.key === "ArrowLeft" && activeSeries) {
+        e.preventDefault();
+        seekToIndex(Number(document.getElementById("positionSlider").value) - 1, true);
+        return;
+    }
+    if (e.key === "ArrowRight" && activeSeries) {
+        e.preventDefault();
+        seekToIndex(Number(document.getElementById("positionSlider").value) + 1, true);
+        return;
+    }
+    if (e.key === "Home" && activeSeries) {
+        e.preventDefault();
+        seekToIndex(0, true);
+        return;
+    }
+    if (e.key === "End" && activeSeries) {
+        e.preventDefault();
+        seekToIndex(activeSeries.prices.length - 1, true);
+        return;
+    }
+    if (e.key.toLowerCase() === "r" && activeSeries) {
+        e.preventDefault();
+        restartActiveAudio();
+        return;
+    }
+    if (e.key.toLowerCase() === "j" && activeSeries) {
+        e.preventDefault();
+        moveActiveSegment(-1);
+        return;
+    }
+    if (e.key.toLowerCase() === "k" && activeSeries) {
+        e.preventDefault();
+        moveActiveSegment(1);
+        return;
+    }
+    if (e.key === "[" && activeSeries) {
+        e.preventDefault();
+        changePlaybackSpeed(-1);
+        return;
+    }
+    if (e.key === "]" && activeSeries) {
+        e.preventDefault();
+        changePlaybackSpeed(1);
+        return;
+    }
+    if (e.key.toLowerCase() === "p" && activeSeries) {
+        e.preventDefault();
+        announceCurrentPosition();
+        return;
+    }
     if (e.key.toLowerCase() === "i") document.getElementById("imageInput").click();
     
     if (e.key.toLowerCase() === "a" && !document.getElementById("analyzeImageBtn").disabled) {
         analyzeImage();
     }
     
-    if (e.key === " " && !document.getElementById("playGraphAudioBtn").disabled) {
+    if (e.key === " " && !activeSeries && !document.getElementById("playGraphAudioBtn").disabled) {
         e.preventDefault();
         playAudio("graphAudio");
     }

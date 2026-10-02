@@ -121,7 +121,7 @@ async function loadStockData(demo = false) {
         source.innerText = payload.source === "tossinvest" ? "토스증권 실데이터" : "샘플 체험 데이터";
         source.className = `source-badge ${payload.source === "tossinvest" ? "live" : "demo"}`;
         document.getElementById("stockSummary").innerText = payload.analysis?.summary || "흐름 설명이 없습니다.";
-        renderStockChart(stockCandles, payload.name);
+        renderStockChart(stockCandles, payload.name, payload.currency);
         await prepareStockAudio();
         status.innerText = `${payload.name}, ${stockData.length}개 봉을 불러왔습니다. 핵심 정보부터 확인하세요.`;
     } catch (error) {
@@ -169,24 +169,140 @@ function readStockSummary() {
     speakText(text);
 }
 
-function renderStockChart(candles, name) {
+function calculateMovingAverage(candles, period) {
+    return candles.map((candle, index) => {
+        if (index < period - 1) return { x: new Date(candle.timestamp).getTime(), y: null };
+        const window = candles.slice(index - period + 1, index + 1);
+        const average = window.reduce((sum, item) => sum + Number(item.close), 0) / period;
+        return { x: new Date(candle.timestamp).getTime(), y: average };
+    });
+}
+
+function renderStockChart(candles, name, currency) {
     if (stockChartInstance) stockChartInstance.destroy();
+    const upColor = "#ef4444";
+    const downColor = "#2563eb";
+    const unchangedColor = "#64748b";
+    const candleData = candles.map(candle => ({
+        x: new Date(candle.timestamp).getTime(),
+        o: Number(candle.open),
+        h: Number(candle.high),
+        l: Number(candle.low),
+        c: Number(candle.close)
+    }));
+    const volumeData = candles.map(candle => ({
+        x: new Date(candle.timestamp).getTime(),
+        y: Number(candle.volume) || 0
+    }));
+    const volumeColors = candles.map(candle => Number(candle.close) > Number(candle.open)
+        ? upColor : Number(candle.close) < Number(candle.open) ? downColor : unchangedColor);
     stockChartInstance = new Chart(document.getElementById("stockChart"), {
-        type: "line",
+        type: "candlestick",
         data: {
-            labels: candles.map(c => c.timestamp),
             datasets: [
-                { label: `${name} 종가`, data: candles.map(c => c.close), borderColor: "#176b57", borderWidth: 3, pointRadius: 2, tension: .15, yAxisID: "priceAxis" },
-                { type: "bar", label: "거래량", data: candles.map(c => c.volume), backgroundColor: "rgba(109, 58, 168, .24)", borderColor: "#6d3aa8", borderWidth: 1, yAxisID: "volumeAxis" }
+                {
+                    type: "candlestick",
+                    label: `${name} 캔들`,
+                    data: candleData,
+                    yAxisID: "priceAxis",
+                    backgroundColors: { up: upColor, down: downColor, unchanged: unchangedColor },
+                    borderColors: { up: upColor, down: downColor, unchanged: unchangedColor },
+                    order: 2
+                },
+                {
+                    type: "line",
+                    label: "5봉 이동평균",
+                    data: calculateMovingAverage(candles, 5),
+                    yAxisID: "priceAxis",
+                    borderColor: "#10b981",
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    tension: .18,
+                    spanGaps: false,
+                    order: 1
+                },
+                {
+                    type: "line",
+                    label: "20봉 이동평균",
+                    data: calculateMovingAverage(candles, 20),
+                    yAxisID: "priceAxis",
+                    borderColor: "#f59e0b",
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    tension: .18,
+                    spanGaps: false,
+                    order: 1
+                },
+                {
+                    type: "bar",
+                    label: "거래량",
+                    data: volumeData,
+                    yAxisID: "volumeAxis",
+                    backgroundColor: volumeColors,
+                    borderWidth: 0,
+                    barPercentage: .82,
+                    categoryPercentage: .92,
+                    order: 3
+                }
             ]
         },
         options: {
             responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
             interaction: { mode: "index", intersect: false },
-            plugins: { legend: { display: true } },
+            plugins: {
+                legend: { display: true, position: "top", align: "start" },
+                tooltip: {
+                    callbacks: {
+                        label(context) {
+                            const raw = context.raw || {};
+                            if (context.dataset.type === "candlestick") {
+                                return [
+                                    `시가 ${formatPrice(raw.o, currency)}`,
+                                    `고가 ${formatPrice(raw.h, currency)}`,
+                                    `저가 ${formatPrice(raw.l, currency)}`,
+                                    `종가 ${formatPrice(raw.c, currency)}`
+                                ];
+                            }
+                            if (context.dataset.label === "거래량") {
+                                return `거래량 ${new Intl.NumberFormat("ko-KR").format(raw.y)}`;
+                            }
+                            return `${context.dataset.label} ${formatPrice(raw.y, currency)}`;
+                        }
+                    }
+                }
+            },
             scales: {
-                priceAxis: { type: "linear", position: "left", title: { display: true, text: "종가 · Pitch" } },
-                volumeAxis: { type: "linear", position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: "거래량 · Volume" } }
+                x: {
+                    type: "timeseries",
+                    offset: true,
+                    time: { tooltipFormat: "yyyy. LL. dd. HH:mm" },
+                    ticks: { source: "auto", maxRotation: 0, autoSkip: true },
+                    grid: { color: "rgba(148, 163, 184, .18)" }
+                },
+                priceAxis: {
+                    type: "linear",
+                    position: "right",
+                    stack: "stock",
+                    stackWeight: 3,
+                    title: { display: true, text: "가격 · Pitch" },
+                    grid: { color: "rgba(148, 163, 184, .24)" }
+                },
+                volumeAxis: {
+                    type: "linear",
+                    position: "right",
+                    stack: "stock",
+                    stackWeight: 1,
+                    beginAtZero: true,
+                    title: { display: true, text: "거래량 · Volume" },
+                    grid: { color: "rgba(148, 163, 184, .14)" },
+                    ticks: {
+                        callback(value) {
+                            return Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+                        }
+                    }
+                }
             }
         }
     });

@@ -22,6 +22,7 @@
 ## 현재 기능
 
 - 토스증권 1분봉·일봉 OHLCV 조회
+- 실제 OHLC 캔들, 5봉·20봉 이동평균과 거래량 차트
 - 인증정보 없는 환경을 위한 명시적 샘플 체험
 - Continuous Phase 기반 Pitch 생성
 - 거래량 `log1p` 정규화와 Amplitude smoothing

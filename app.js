@@ -14,6 +14,9 @@ let extractedGraphData = [],
     voices = [],
     stockChartInstance = null;
 const rankingNameBySymbol = new Map();
+const rankingSymbolByName = new Map();
+const rankingFilters = { type: "MARKET_TRADING_AMOUNT", marketCountry: "KR", duration: "realtime" };
+let rankingRequestId = 0;
 
 let activeSeries = null,
     playbackSpeed = 1,
@@ -91,7 +94,33 @@ const STOCK_SYMBOLS = {
 document.getElementById("loadStockBtn").addEventListener("click", () => loadStockData(false));
 document.getElementById("loadDemoBtn").addEventListener("click", () => loadStockData(true));
 document.getElementById("readStockBtn").addEventListener("click", readStockSummary);
-document.getElementById("loadRankingsBtn").addEventListener("click", loadStockRankings);
+document.getElementById("refreshRankingsBtn").addEventListener("click", loadStockRankings);
+document.querySelectorAll(".market-tab").forEach(button => {
+    button.addEventListener("click", () => {
+        rankingFilters.marketCountry = button.dataset.market;
+        setActiveRankingButtons(".market-tab", "market", rankingFilters.marketCountry);
+        loadStockRankings();
+    });
+});
+document.querySelectorAll(".ranking-tab").forEach(button => {
+    button.addEventListener("click", () => {
+        rankingFilters.type = button.dataset.rankingType;
+        setActiveRankingButtons(".ranking-tab", "rankingType", rankingFilters.type);
+        loadStockRankings();
+    });
+});
+document.getElementById("rankingDuration").addEventListener("change", event => {
+    rankingFilters.duration = event.target.value;
+    loadStockRankings();
+});
+
+function setActiveRankingButtons(selector, dataKey, value) {
+    document.querySelectorAll(selector).forEach(button => {
+        const active = button.dataset[dataKey] === value;
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-pressed", String(active));
+    });
+}
 
 function formatRankingMetric(item, rankingType) {
     if (rankingType.includes("TRADING_VOLUME")) {
@@ -109,6 +138,7 @@ function renderStockRankings(payload) {
     suggestions.querySelectorAll("option[data-ranking]").forEach(option => option.remove());
     payload.rankings.forEach(item => {
         rankingNameBySymbol.set(item.symbol, { name: item.name, currency: item.currency });
+        rankingSymbolByName.set(item.name.toLowerCase(), item.symbol);
         const option = document.createElement("option");
         option.value = item.name;
         option.label = item.symbol;
@@ -121,6 +151,7 @@ function renderStockRankings(payload) {
         const changeText = `${sign}${item.change_percent.toFixed(2)}%`;
         button.type = "button";
         button.className = "ranking-item";
+        button.dataset.symbol = item.symbol;
         button.setAttribute("aria-label", `${item.rank}위 ${item.name}, 현재가 ${formatPrice(item.last_price, item.currency)}, 등락률 ${changeText}, ${formatRankingMetric(item, payload.type)}. 차트 조회`);
 
         const rank = document.createElement("strong");
@@ -143,10 +174,29 @@ function renderStockRankings(payload) {
         metric.className = "ranking-metric";
         metric.innerText = formatRankingMetric(item, payload.type);
         button.append(rank, identity, priceText, change, metric);
-        button.addEventListener("click", () => {
+        button.addEventListener("click", async () => {
+            list.querySelectorAll(".ranking-item").forEach(other => other.removeAttribute("aria-current"));
+            button.setAttribute("aria-current", "true");
             document.getElementById("stockSearch").value = item.symbol;
             document.getElementById("rankingStatus").innerText = `${item.name} 종목을 선택했습니다. 차트를 불러오는 중입니다.`;
-            loadStockData(false);
+            await loadStockData(false);
+            if (currentStockPayload?.symbol === item.symbol) {
+                document.getElementById("stockResults").scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+        });
+        button.addEventListener("keydown", event => {
+            const buttons = [...list.querySelectorAll(".ranking-item")];
+            const index = buttons.indexOf(button);
+            let targetIndex = null;
+            if (event.key === "ArrowDown") targetIndex = Math.min(buttons.length - 1, index + 1);
+            if (event.key === "ArrowUp") targetIndex = Math.max(0, index - 1);
+            if (event.key === "Home") targetIndex = 0;
+            if (event.key === "End") targetIndex = buttons.length - 1;
+            if (targetIndex !== null) {
+                event.preventDefault();
+                event.stopPropagation();
+                buttons[targetIndex].focus();
+            }
         });
         row.appendChild(button);
         list.appendChild(row);
@@ -154,41 +204,53 @@ function renderStockRankings(payload) {
 }
 
 async function loadStockRankings() {
-    const type = document.getElementById("rankingType").value;
-    const marketCountry = document.getElementById("rankingMarket").value;
     const durationSelect = document.getElementById("rankingDuration");
     const status = document.getElementById("rankingStatus");
-    const button = document.getElementById("loadRankingsBtn");
-    let duration = durationSelect.value;
+    const browser = document.querySelector(".ranking-browser");
+    const refreshButton = document.getElementById("refreshRankingsBtn");
+    const requestId = ++rankingRequestId;
+    const type = rankingFilters.type;
+    const marketCountry = rankingFilters.marketCountry;
+    let duration = rankingFilters.duration;
     let durationNotice = "";
     if (["TOP_GAINERS", "TOP_LOSERS"].includes(type) && duration === "realtime") {
         duration = "1d";
+        rankingFilters.duration = duration;
         durationSelect.value = "1d";
         durationNotice = "급등락 순위는 실시간 산정을 지원하지 않아 1일 기준으로 변경했습니다. ";
     }
+    document.getElementById("rankingMetricHeading").innerText = type.includes("TRADING_VOLUME") ? "거래량" : "거래대금";
     status.innerText = `${durationNotice}종목 순위를 불러오는 중입니다.`;
-    button.disabled = true;
+    browser.setAttribute("aria-busy", "true");
+    refreshButton.disabled = true;
     try {
         const params = new URLSearchParams({ type, market_country: marketCountry, duration, count: "10" });
         const response = await fetch(`${SERVER_URL}/stock-rankings?${params}`);
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || "종목 순위를 불러오지 못했습니다.");
+        if (requestId !== rankingRequestId) return;
         renderStockRankings(payload);
         const rankedAt = payload.ranked_at ? formatTimestamp(payload.ranked_at) : "집계 시각 없음";
         status.innerText = payload.rankings.length
             ? `${durationNotice}${rankedAt} 기준 상위 ${payload.rankings.length}개 종목입니다.`
             : `${durationNotice}현재 조건에 집계된 종목이 없습니다.`;
     } catch (error) {
+        if (requestId !== rankingRequestId) return;
         document.getElementById("rankingList").replaceChildren();
         status.innerText = `${error.message} 종목명이나 코드를 직접 입력할 수도 있습니다.`;
     } finally {
-        button.disabled = false;
+        if (requestId === rankingRequestId) {
+            browser.setAttribute("aria-busy", "false");
+            refreshButton.disabled = false;
+        }
     }
 }
 
+loadStockRankings();
+
 async function loadStockData(demo = false) {
     const query = document.getElementById("stockSearch").value.trim();
-    const symbol = STOCK_SYMBOLS[query.toLowerCase()] || STOCK_SYMBOLS[query] || query.toUpperCase();
+    const symbol = STOCK_SYMBOLS[query.toLowerCase()] || STOCK_SYMBOLS[query] || rankingSymbolByName.get(query.toLowerCase()) || query.toUpperCase();
     const interval = document.getElementById("stockInterval").value;
     const count = Number(document.getElementById("stockCount").value);
     const status = document.getElementById("stockStatus");
@@ -921,6 +983,12 @@ document.addEventListener("keydown", e => {
         e.preventDefault();
         document.getElementById("stockSearch").focus();
         document.getElementById("stockSearch").select();
+        return;
+    }
+    if (e.key.toLowerCase() === "g" && !isTyping) {
+        e.preventDefault();
+        const firstRanking = document.querySelector(".ranking-item");
+        (firstRanking || document.getElementById("rankingHeading")).focus();
         return;
     }
     if (e.key.toLowerCase() === "l" && !isTyping) {

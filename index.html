@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>피타고라스 — 주식 차트 공간음향</title>
-  <link rel="stylesheet" href="style.css?v=20261002-candles">
+  <link rel="stylesheet" href="style.css?v=20261002-rankings">
   <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1"></script>
@@ -75,6 +75,36 @@
         <div><p class="step-label">1단계</p><h2 id="stockHeading">종목과 조회 기간 선택</h2></div>
         <span class="source-badge neutral" id="stockSource" role="status">조회 전</span>
       </div>
+
+      <section class="ranking-browser" aria-labelledby="rankingHeading">
+        <div class="ranking-heading">
+          <div><p class="step-label">종목 빠르게 찾기</p><h3 id="rankingHeading">실시간 인기 종목</h3></div>
+          <p>순위에서 종목을 선택하면 차트와 공간음향을 바로 불러옵니다.</p>
+        </div>
+        <div class="ranking-controls">
+          <label for="rankingType">순위 기준
+            <select id="rankingType">
+              <option value="MARKET_TRADING_AMOUNT">시장 거래대금</option>
+              <option value="MARKET_TRADING_VOLUME">시장 거래량</option>
+              <option value="TOP_GAINERS">급상승</option>
+              <option value="TOP_LOSERS">급하락</option>
+              <option value="TOSS_SECURITIES_TRADING_AMOUNT">토스증권 인기·거래대금</option>
+              <option value="TOSS_SECURITIES_TRADING_VOLUME">토스증권 거래량</option>
+            </select>
+          </label>
+          <label for="rankingMarket">시장
+            <select id="rankingMarket"><option value="KR">국내</option><option value="US">미국</option></select>
+          </label>
+          <label for="rankingDuration">기간
+            <select id="rankingDuration"><option value="realtime">실시간</option><option value="1d">1일</option><option value="1w">1주</option><option value="1mo">1개월</option></select>
+          </label>
+          <button class="btn-secondary" id="loadRankingsBtn" type="button">상위 10개 보기</button>
+        </div>
+        <div id="rankingStatus" class="ranking-status" role="status" aria-live="polite">원하는 순위 기준을 선택해 목록을 불러오세요.</div>
+        <ol id="rankingList" class="ranking-list" aria-label="주식 종목 순위"></ol>
+      </section>
+
+      <div class="search-divider"><span>또는 종목 직접 검색</span></div>
 
       <div class="stock-controls">
         <label for="stockSearch">종목명 또는 종목 코드
@@ -160,6 +190,6 @@
       <audio id="graphAudio"></audio>
     </details>
   </main>
-  <script src="app.js?v=20261002-candles"></script>
+  <script src="app.js?v=20261002-rankings"></script>
 </body>
 </html>

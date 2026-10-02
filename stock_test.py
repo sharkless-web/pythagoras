@@ -9,7 +9,7 @@ from urllib.error import URLError
 
 import engine
 import server
-from stock_service import StockDataError, fetch_recent_candles, get_close_prices
+from stock_service import StockDataError, fetch_recent_candles, fetch_stock_rankings, get_close_prices
 
 
 class FakeResponse:
@@ -77,6 +77,38 @@ class StockServiceTest(unittest.TestCase):
         wav_file = engine.generate_stereo_sound(closes, 800, "sine")
         self.assertIsInstance(wav_file, io.BytesIO)
         self.assertEqual(wav_file.read(4), b"RIFF")
+
+    def test_rankings_are_enriched_with_stock_names(self):
+        opener = FakeOpener(
+            self,
+            [
+                {"access_token": "test-token"},
+                {"result": {"rankedAt": "2026-10-02T14:30:00+09:00", "rankings": [{
+                    "rank": 1,
+                    "symbol": "005930",
+                    "currency": "KRW",
+                    "price": {"lastPrice": "72000", "basePrice": "70000", "changeRate": "0.0285"},
+                    "tradingVolume": "18432100",
+                    "tradingAmount": "1041436650000",
+                }]}},
+                {"result": [{"symbol": "005930", "name": "삼성전자", "currency": "KRW"}]},
+            ],
+        )
+        payload = fetch_stock_rankings(
+            "MARKET_TRADING_AMOUNT", "KR", "realtime", 10,
+            client_id="id", client_secret="secret", opener=opener,
+        )
+        self.assertEqual(payload["rankings"][0]["name"], "삼성전자")
+        self.assertAlmostEqual(payload["rankings"][0]["change_percent"], 2.85)
+        self.assertIn("marketCountry=KR", opener.requests[1].full_url)
+        self.assertIn("symbols=005930", opener.requests[2].full_url)
+
+    def test_realtime_is_rejected_for_gainer_rankings(self):
+        with self.assertRaisesRegex(ValueError, "do not support realtime"):
+            fetch_stock_rankings(
+                "TOP_GAINERS", "KR", "realtime", 10,
+                client_id="id", client_secret="secret",
+            )
 
     def test_demo_endpoint_is_explicit_and_includes_accessible_metrics(self):
         payload = server.stock_candles("005930", "1m", 30, demo=True)

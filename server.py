@@ -7,7 +7,7 @@ import numpy as np
 import engine
 import config
 from spatial_audio import generate_spatial_audio
-from stock_service import StockDataError, fetch_recent_candles, get_sample_candles
+from stock_service import StockDataError, fetch_recent_candles, fetch_stock_rankings, get_sample_candles
 
 app = FastAPI(title="Project Pythagoras Graph Accessibility API")
 
@@ -67,6 +67,21 @@ def stock_search(q: str = ""):
         if not query or query in symbol.lower() or query in name.lower()
     ]
     return {"results": matches[:10]}
+
+
+@app.get("/stock-rankings")
+def stock_rankings(
+    type: str = "MARKET_TRADING_AMOUNT",
+    market_country: str = "KR",
+    duration: str = "realtime",
+    count: int = 10,
+):
+    try:
+        return fetch_stock_rankings(type, market_country, duration, count)
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=422)
+    except StockDataError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=503)
 
 
 @app.get("/stock-candles")

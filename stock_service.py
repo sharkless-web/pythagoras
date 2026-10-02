@@ -6,7 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -14,6 +14,16 @@ from urllib.request import Request, urlopen
 
 DEFAULT_API_BASE_URL = "https://openapi.tossinvest.com"
 SUPPORTED_INTERVALS = {"1m", "1d"}
+SUPPORTED_RANKING_TYPES = {
+    "MARKET_TRADING_AMOUNT",
+    "MARKET_TRADING_VOLUME",
+    "TOP_GAINERS",
+    "TOP_LOSERS",
+    "TOSS_SECURITIES_TRADING_AMOUNT",
+    "TOSS_SECURITIES_TRADING_VOLUME",
+}
+SUPPORTED_MARKET_COUNTRIES = {"KR", "US"}
+SUPPORTED_RANKING_DURATIONS = {"realtime", "1d", "1w", "1mo", "3mo", "6mo", "1y"}
 
 
 class StockDataError(RuntimeError):
@@ -144,6 +154,117 @@ def _friendly_url_error(error: URLError) -> str:
             "API 서버를 일반 PowerShell에서 실행하거나 방화벽 정책을 확인하세요."
         )
     return "토스증권 서버에 연결할 수 없습니다. 인터넷 연결과 API 서버 실행 권한을 확인하세요."
+
+
+def _parse_stock_names(payload: dict) -> Dict[str, str]:
+    values = payload.get("result")
+    if not isinstance(values, list):
+        return {}
+    return {
+        str(value.get("symbol", "")).upper(): str(value.get("name") or value.get("symbol") or "")
+        for value in values
+        if value.get("symbol")
+    }
+
+
+def fetch_stock_rankings(
+    ranking_type: str = "MARKET_TRADING_AMOUNT",
+    market_country: str = "KR",
+    duration: str = "realtime",
+    count: int = 10,
+    *,
+    exclude_investment_caution: bool = True,
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None,
+    opener: Callable = urlopen,
+) -> dict:
+    """Fetch a Toss market ranking and enrich entries with stock names."""
+    ranking_type = ranking_type.strip().upper()
+    market_country = market_country.strip().upper()
+    duration = duration.strip().lower()
+    if ranking_type not in SUPPORTED_RANKING_TYPES:
+        raise ValueError(f"unsupported ranking type: {ranking_type}")
+    if market_country not in SUPPORTED_MARKET_COUNTRIES:
+        raise ValueError(f"unsupported market country: {market_country}")
+    if duration not in SUPPORTED_RANKING_DURATIONS:
+        raise ValueError(f"unsupported ranking duration: {duration}")
+    if ranking_type in {"TOP_GAINERS", "TOP_LOSERS"} and duration == "realtime":
+        raise ValueError("TOP_GAINERS and TOP_LOSERS do not support realtime duration")
+    if not 1 <= count <= 100:
+        raise ValueError("count must be between 1 and 100")
+
+    resolved_id = client_id or os.getenv("TOSSINVEST_CLIENT_ID")
+    resolved_secret = client_secret or os.getenv("TOSSINVEST_CLIENT_SECRET")
+    if not resolved_id or not resolved_secret:
+        raise StockDataError("TOSSINVEST_CLIENT_ID and TOSSINVEST_CLIENT_SECRET are required")
+
+    base_url = os.getenv("TOSSINVEST_API_BASE_URL", DEFAULT_API_BASE_URL).rstrip("/")
+    try:
+        token = _issue_access_token(resolved_id, resolved_secret, base_url, opener)
+        query = urlencode({
+            "type": ranking_type,
+            "marketCountry": market_country,
+            "duration": duration,
+            "excludeInvestmentCaution": str(exclude_investment_caution).lower(),
+            "count": count,
+        })
+        request = Request(
+            f"{base_url}/api/v1/rankings?{query}",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        )
+        with opener(request, timeout=10) as response:
+            payload = _read_json(response)
+        result = payload.get("result", {})
+        values = result.get("rankings")
+        if not isinstance(values, list):
+            error = payload.get("error", {})
+            raise StockDataError(error.get("message", "Ranking data was not returned"))
+
+        symbols = [str(value.get("symbol", "")).upper() for value in values if value.get("symbol")]
+        names: Dict[str, str] = {}
+        if symbols:
+            stock_query = urlencode({"symbols": ",".join(symbols)})
+            stock_request = Request(
+                f"{base_url}/api/v1/stocks?{stock_query}",
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            )
+            with opener(stock_request, timeout=10) as response:
+                names = _parse_stock_names(_read_json(response))
+
+        rankings = []
+        for value in values:
+            try:
+                symbol = str(value["symbol"]).upper()
+                price = value.get("price") or {}
+                rankings.append({
+                    "rank": int(value["rank"]),
+                    "symbol": symbol,
+                    "name": names.get(symbol, symbol),
+                    "currency": str(value.get("currency") or ("KRW" if market_country == "KR" else "USD")),
+                    "last_price": float(price["lastPrice"]),
+                    "base_price": float(price["basePrice"]),
+                    "change_percent": float(price["changeRate"]) * 100.0,
+                    "trading_volume": float(value.get("tradingVolume") or 0),
+                    "trading_amount": float(value.get("tradingAmount") or 0),
+                })
+            except (KeyError, TypeError, ValueError) as exc:
+                raise StockDataError(f"Invalid ranking in Toss Securities response: {exc}") from exc
+        return {
+            "type": ranking_type,
+            "market_country": market_country,
+            "duration": duration,
+            "ranked_at": result.get("rankedAt"),
+            "rankings": rankings,
+            "source": "tossinvest",
+        }
+    except (HTTPError, URLError, TimeoutError, StockDataError) as exc:
+        if isinstance(exc, HTTPError):
+            raise StockDataError(_friendly_http_error(exc)) from exc
+        if isinstance(exc, URLError):
+            raise StockDataError(_friendly_url_error(exc)) from exc
+        if isinstance(exc, StockDataError):
+            raise
+        raise StockDataError(f"Unable to fetch Toss Securities rankings: {exc}") from exc
 
 
 def fetch_recent_candles(

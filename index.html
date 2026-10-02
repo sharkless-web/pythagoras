@@ -52,7 +52,7 @@
 
     <section class="info-box">
       <strong>키보드 사용법</strong>
-      <span><kbd>/</kbd> 종목 검색, <kbd>L</kbd> 실시간 조회, <kbd>Space</kbd> 재생/일시정지, <kbd>Home</kbd> 처음, <kbd>J</kbd>/<kbd>K</kbd> 구간 이동, <kbd>[</kbd>/<kbd>]</kbd> 속도, <kbd>P</kbd> 현재 위치 안내, <kbd>Esc</kbd> 정지</span>
+      <span><kbd>/</kbd> 종목 검색, <kbd>L</kbd> 실시간 조회, <kbd>Space</kbd> 재생/일시정지, <kbd>←</kbd>/<kbd>→</kbd> 한 봉 이동, <kbd>Home</kbd>/<kbd>End</kbd> 처음·끝, <kbd>J</kbd>/<kbd>K</kbd> 구간 이동, <kbd>R</kbd> 처음부터 재생, <kbd>P</kbd> 현재 위치 안내, <kbd>Esc</kbd> 정지</span>
     </section>
   </aside>
 
@@ -128,12 +128,12 @@
         <button class="btn-secondary" id="fasterBtn" type="button" disabled>속도 증가</button>
         <button class="btn-secondary" id="announcePositionBtn" type="button" disabled>현재 위치 읽기</button>
       </div>
-      <div class="playback-state" role="status" aria-live="polite">
-        <strong id="playbackState">정지</strong><span id="speedState">속도 1배</span><span id="currentPosition">위치 정보 없음</span>
+      <div class="playback-state">
+        <strong id="playbackState" role="status" aria-live="polite">정지</strong><span id="speedState">속도 1배</span><span id="currentPosition">위치 정보 없음</span>
       </div>
       <label for="positionSlider">재생 위치 탐색</label>
       <input id="positionSlider" type="range" min="0" max="0" value="0" step="1" disabled aria-describedby="currentPointDetail">
-      <output id="currentPointDetail" class="candle-detail">주식 데이터를 조회하면 현재 종가와 거래량을 확인할 수 있습니다.</output>
+      <output id="currentPointDetail" class="candle-detail">주식 데이터를 조회하면 현재 시가, 고가, 저가, 종가와 거래량을 확인할 수 있습니다.</output>
     </section>
 
     <details class="panel helper-panel" id="supportTools">
@@ -154,6 +154,6 @@
       <audio id="graphAudio"></audio>
     </details>
   </main>
-  <script src="app.js"></script>
+  <script src="app.js?v=20261002-accessibility"></script>
 </body>
 </html>

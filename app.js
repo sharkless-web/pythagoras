@@ -17,7 +17,8 @@ let extractedGraphData = [],
 let activeSeries = null,
     playbackSpeed = 1,
     spatialAudioUrl = null,
-    pendingSeekIndex = null;
+    pendingSeekIndex = null,
+    speechRequestId = 0;
 
 const BASE_PLAYBACK_SECONDS = 8;
 const SPEED_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2];
@@ -201,6 +202,7 @@ async function prepareStockAudio() {
         timestamps: stockCandles.map(candle => candle.timestamp),
         prices: stockData.map(Number),
         volumes: usableVolumes,
+        candles: stockCandles,
         priceLabel: "종가",
         volumeLabel: "거래량",
         currency: currentStockPayload.currency
@@ -534,7 +536,7 @@ function setPlayerControlsDisabled(disabled) {
 function playPauseActiveAudio() {
     const audio = document.getElementById("spatialAudio");
     if (!audio.src) return;
-    window.speechSynthesis.cancel();
+    cancelSpeech();
     if (audio.paused) audio.play();
     else audio.pause();
 }
@@ -591,11 +593,20 @@ function renderActivePoint(index) {
     const percentage = activeSeries.prices.length > 1
         ? Math.round(bounded / (activeSeries.prices.length - 1) * 100) : 100;
     const timestamp = activeSeries.timestamps?.[bounded] ?? `${bounded + 1}번째 시점`;
-    const volume = activeSeries.volumes
-        ? new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(activeSeries.volumes[bounded])
-        : "사용하지 않음";
+    const formatVolume = value => Number.isFinite(Number(value))
+        ? new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(value)
+        : "정보 없음";
+    const volume = activeSeries.volumes ? formatVolume(activeSeries.volumes[bounded]) : "사용하지 않음";
+    const candle = activeSeries.source === "stock" ? activeSeries.candles?.[bounded] : null;
+    const detail = candle
+        ? `${formatTimestamp(timestamp)}. 시가 ${formatActivePrice(candle.open)}, 고가 ${formatActivePrice(candle.high)}, 저가 ${formatActivePrice(candle.low)}, 종가 ${formatActivePrice(candle.close)}, 거래량 ${formatVolume(candle.volume)}.`
+        : `${formatTimestamp(timestamp)}. ${activeSeries.priceLabel || "주 데이터"} ${formatActivePrice(activeSeries.prices[bounded])}. ${activeSeries.volumeLabel || "보조 데이터"} ${volume}.`;
     document.getElementById("currentPosition").innerText = `전체의 ${percentage}% · ${bounded + 1}/${activeSeries.prices.length}`;
-    document.getElementById("currentPointDetail").innerText = `${formatTimestamp(timestamp)}. ${activeSeries.priceLabel || "주 데이터"} ${formatActivePrice(activeSeries.prices[bounded])}. ${activeSeries.volumeLabel || "보조 데이터"} ${volume}.`;
+    document.getElementById("currentPointDetail").innerText = detail;
+    document.getElementById("positionSlider").setAttribute(
+        "aria-valuetext",
+        `전체의 ${percentage}퍼센트, ${detail}`
+    );
 }
 
 function announceCurrentPosition() {
@@ -606,14 +617,26 @@ function announceCurrentPosition() {
     speakText(`현재 전체의 ${percentage}퍼센트 지점입니다. ${document.getElementById("currentPointDetail").innerText} 재생 속도 ${playbackSpeed}배입니다.`);
 }
 
+function cancelSpeech() {
+    speechRequestId += 1;
+    window.speechSynthesis.cancel();
+}
+
 function speakText(text) {
-    document.querySelectorAll("audio").forEach(audio => audio.pause());
+    const requestId = ++speechRequestId;
+    const playingAudios = Array.from(document.querySelectorAll("audio"))
+        .filter(audio => !audio.paused && !audio.ended);
+    playingAudios.forEach(audio => audio.pause());
     window.speechSynthesis.cancel();
     const message = new SpeechSynthesisUtterance(text);
     message.lang = "ko-KR";
     message.rate = 1;
     const koreanVoice = voices.find(voice => voice.lang.includes("ko"));
     if (koreanVoice) message.voice = koreanVoice;
+    message.onend = () => {
+        if (requestId !== speechRequestId) return;
+        playingAudios.forEach(audio => audio.play().catch(() => {}));
+    };
     window.speechSynthesis.speak(message);
 }
 
@@ -660,7 +683,7 @@ function readGraphDescription() {
 }
 
 function stopAllAudio() {
-    window.speechSynthesis.cancel();
+    cancelSpeech();
     document.querySelectorAll("audio").forEach(a => {
         a.pause();
         a.currentTime = 0;
@@ -694,7 +717,27 @@ document.addEventListener("keydown", e => {
         playPauseActiveAudio();
         return;
     }
+    if (e.key === "ArrowLeft" && activeSeries) {
+        e.preventDefault();
+        seekToIndex(Number(document.getElementById("positionSlider").value) - 1, true);
+        return;
+    }
+    if (e.key === "ArrowRight" && activeSeries) {
+        e.preventDefault();
+        seekToIndex(Number(document.getElementById("positionSlider").value) + 1, true);
+        return;
+    }
     if (e.key === "Home" && activeSeries) {
+        e.preventDefault();
+        seekToIndex(0, true);
+        return;
+    }
+    if (e.key === "End" && activeSeries) {
+        e.preventDefault();
+        seekToIndex(activeSeries.prices.length - 1, true);
+        return;
+    }
+    if (e.key.toLowerCase() === "r" && activeSeries) {
         e.preventDefault();
         restartActiveAudio();
         return;

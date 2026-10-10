@@ -9,7 +9,7 @@ from urllib.error import URLError
 
 import engine
 import server
-from stock_service import StockDataError, fetch_recent_candles, fetch_stock_rankings, get_close_prices
+from stock_service import Candle, StockDataError, aggregate_minute_candles, fetch_recent_candles, fetch_stock_rankings, get_close_prices
 
 
 class FakeResponse:
@@ -70,6 +70,36 @@ class StockServiceTest(unittest.TestCase):
         self.assertEqual(series.close_prices, [102.0, 103.0])
         self.assertTrue(opener.requests[0].full_url.endswith("/oauth2/token"))
         self.assertEqual(opener.requests[1].get_header("Authorization"), "Bearer test-token")
+
+    def test_derived_intervals_combine_actual_minute_ohlcv(self):
+        candles = [Candle(f"2026-10-08T09:{minute:02d}:00+09:00", 100 + minute,
+                          104 + minute, 98 + minute, 101 + minute, minute + 1)
+                   for minute in range(16)]
+        for interval, expected_lengths in [(5, [5, 5, 5, 1]), (15, [15, 1]), (60, [16])]:
+            result = aggregate_minute_candles(list(reversed(candles)), interval)
+            self.assertEqual(len(result), len(expected_lengths))
+            self.assertEqual(result[0].open, 100)
+            self.assertEqual(result[0].close, 100 + expected_lengths[0])
+            self.assertEqual(result[0].high, 104 + expected_lengths[0] - 1)
+            self.assertEqual(result[0].low, 98)
+            self.assertEqual(result[0].volume, sum(range(1, expected_lengths[0] + 1)))
+
+    def test_five_minute_live_fetch_paginates_only_one_minute_api(self):
+        def candle(minute):
+            return {"timestamp": f"2026-10-08T09:{minute:02d}:00+09:00", "openPrice": "100",
+                    "highPrice": "110", "lowPrice": "90", "closePrice": str(100 + minute), "volume": "10"}
+        opener = FakeOpener(self, [
+            {"access_token": "test-token"},
+            {"result": {"candles": [candle(n) for n in range(14, 4, -1)], "nextBefore": "2026-10-08T09:04:00+09:00"}},
+            {"result": {"candles": [candle(n) for n in range(4, -1, -1)], "nextBefore": None}},
+        ])
+        series = fetch_recent_candles("005930", "5m", 2, client_id="id", client_secret="secret",
+                                      fallback_to_sample=False, opener=opener)
+        self.assertEqual(series.source, "tossinvest")
+        self.assertEqual(series.close_prices, [109, 114])
+        self.assertEqual([c.volume for c in series.candles], [50, 50])
+        self.assertIn("interval=1m", opener.requests[1].full_url)
+        self.assertIn("before=2026-10-08T09%3A04%3A00%2B09%3A00", opener.requests[2].full_url)
 
     def test_close_prices_connect_to_existing_audio_engine(self):
         with patch.dict(os.environ, {}, clear=True):

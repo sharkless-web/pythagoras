@@ -25,3 +25,5 @@ Thumbs.db
 
 # Local deployment tools
 .tools/
+
+.test-deps/

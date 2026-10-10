@@ -13,7 +13,8 @@ from urllib.request import Request, urlopen
 
 
 DEFAULT_API_BASE_URL = "https://openapi.tossinvest.com"
-SUPPORTED_INTERVALS = {"1m", "1d"}
+SUPPORTED_INTERVALS = {"1m", "5m", "15m", "60m", "1d"}
+DERIVED_MINUTES = {"5m": 5, "15m": 15, "60m": 60}
 SUPPORTED_RANKING_TYPES = {
     "MARKET_TRADING_AMOUNT",
     "MARKET_TRADING_VOLUME",
@@ -53,7 +54,7 @@ class StockSeries:
 
 
 def _sample_candles(symbol: str, interval: str, count: int) -> StockSeries:
-    step = timedelta(minutes=1) if interval == "1m" else timedelta(days=1)
+    step = timedelta(minutes=DERIVED_MINUTES.get(interval, 1)) if interval != "1d" else timedelta(days=1)
     start = datetime(2026, 1, 2, 9, 0)
     pullbacks = [0, 100, -50, 200, 400, 350]
     candles: List[Candle] = []
@@ -285,6 +286,8 @@ def fetch_recent_candles(
         raise ValueError(f"unsupported interval: {interval}")
     if not 2 <= count <= 200:
         raise ValueError("count must be between 2 and 200")
+    if interval in DERIVED_MINUTES and count > 30:
+        raise ValueError("aggregated intervals support at most 30 candles")
 
     resolved_id = client_id or os.getenv("TOSSINVEST_CLIENT_ID")
     resolved_secret = client_secret or os.getenv("TOSSINVEST_CLIENT_SECRET")
@@ -296,13 +299,32 @@ def fetch_recent_candles(
     base_url = os.getenv("TOSSINVEST_API_BASE_URL", DEFAULT_API_BASE_URL).rstrip("/")
     try:
         token = _issue_access_token(resolved_id, resolved_secret, base_url, opener)
-        query = urlencode({"symbol": symbol, "interval": interval, "count": count, "adjusted": "true"})
-        request = Request(
-            f"{base_url}/api/v1/candles?{query}",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-        )
-        with opener(request, timeout=10) as response:
-            return _parse_candles(_read_json(response), symbol, interval, count)
+        api_interval = "1m" if interval in DERIVED_MINUTES else interval
+        raw_candles: Dict[str, Candle] = {}
+        before = None
+        for _ in range(20 if interval in DERIVED_MINUTES else 1):
+            query_values = {"symbol": symbol, "interval": api_interval,
+                            "count": 200 if interval in DERIVED_MINUTES else count,
+                            "adjusted": "true"}
+            if before:
+                query_values["before"] = before
+            request = Request(
+                f"{base_url}/api/v1/candles?{urlencode(query_values)}",
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            )
+            with opener(request, timeout=10) as response:
+                payload = _read_json(response)
+            page = _parse_candles(payload, symbol, api_interval, 200)
+            for candle in page.candles:
+                raw_candles[candle.timestamp] = candle
+            if interval not in DERIVED_MINUTES:
+                return StockSeries(symbol, interval, page.candles[-count:], "tossinvest")
+            aggregated = aggregate_minute_candles(list(raw_candles.values()), DERIVED_MINUTES[interval], symbol)
+            next_before = payload.get("result", {}).get("nextBefore")
+            if len(aggregated) > count or not next_before or next_before == before:
+                return StockSeries(symbol, interval, aggregated[-count:], "tossinvest")
+            before = next_before
+        raise StockDataError("요청한 봉을 구성할 1분봉 데이터가 너무 많습니다. 조회 기간을 줄여주세요.")
     except (HTTPError, URLError, TimeoutError, StockDataError) as exc:
         if fallback_to_sample:
             return _sample_candles(symbol, interval, count)
@@ -317,3 +339,28 @@ def fetch_recent_candles(
 
 def get_close_prices(symbol: str, interval: str = "1m", count: int = 30, **kwargs) -> List[float]:
     return fetch_recent_candles(symbol, interval, count, **kwargs).close_prices
+
+
+def aggregate_minute_candles(candles: List[Candle], minutes: int, symbol: str = "005930") -> List[Candle]:
+    """Combine 1m OHLCV on stable exchange-session clock boundaries."""
+    if minutes not in DERIVED_MINUTES.values():
+        raise ValueError("unsupported aggregation interval")
+    ordered = sorted(candles, key=lambda candle: candle.timestamp)
+    anchor = 540 if symbol.isdigit() and len(symbol) == 6 else 570
+    groups = {}
+    for candle in ordered:
+        instant = datetime.fromisoformat(candle.timestamp)
+        day = instant.date().isoformat()
+        local_minute = instant.hour * 60 + instant.minute
+        bucket = (day, (local_minute - anchor) // minutes)
+        groups.setdefault(bucket, []).append(candle)
+    result = []
+    for group in groups.values():
+        first, last = group[0], group[-1]
+        result.append(Candle(
+            timestamp=first.timestamp, open=first.open,
+            high=max(item.high for item in group),
+            low=min(item.low for item in group), close=last.close,
+            volume=sum(item.volume for item in group) if all(item.volume is not None for item in group) else None,
+        ))
+    return result

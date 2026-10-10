@@ -1,0 +1,6 @@
+const test=require('node:test'),assert=require('node:assert/strict');
+const {SpeechController}=require('./tts.js');
+function fixture(){let calls=[], states=[];const synth={getVoices:()=>[{lang:'ko-KR',name:'Korean'}],addEventListener(){},cancel(){calls.push('cancel')},resume(){calls.push('resume')},speak(u){calls.push(u)}}; class Utterance{constructor(text){this.text=text;}};return {calls,states,controller:new SpeechController(synth,Utterance,(text,state)=>states.push(state))};}
+test('explicit speech cancels old queue, sets Korean and completes',()=>{const f=fixture();f.controller.speak('삼성전자 차트입니다.');assert.equal(f.calls[0],'cancel');const u=f.calls[2];assert.equal(u.lang,'ko-KR');assert.equal(u.voice.name,'Korean');u.onstart();u.onend();assert.deepEqual(f.states,['pending','speaking','complete']);f.controller.cancel();});
+test('superseded events cannot overwrite current speech status',()=>{const f=fixture();f.controller.speak('이전');const old=f.calls[2];f.controller.speak('새 안내');old.onend();assert.equal(f.states.at(-1),'pending');f.controller.cancel();});
+test('missing speech support preserves readable error',()=>{let state;new SpeechController(null,null,(_,s)=>state=s).speak('안내');assert.equal(state,'unsupported');});

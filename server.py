@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from chart_data import ChartData, ExistingStockProvider, summarize_chart
 from pydantic import BaseModel
 from typing import List, Optional
 import numpy as np
@@ -102,7 +102,10 @@ def stock_candles(symbol: str = "005930", interval: str = "1m", count: int = 30,
         change_percent = (change / first * 100.0) if first else 0.0
         name, default_currency = STOCK_NAMES.get(series.symbol, (series.symbol, "KRW"))
         candle_currency = default_currency
+        chart = ExistingStockProvider(series).load() if all(c.volume is not None for c in series.candles) else None
         return {
+            "chart": chart.model_dump(mode="json") if chart else None,
+            "summary": summarize_chart(chart) if chart else None,
             "symbol": series.symbol,
             "name": name,
             "currency": candle_currency,
@@ -115,8 +118,8 @@ def stock_candles(symbol: str = "005930", interval: str = "1m", count: int = 30,
                 "latest": latest,
                 "change": change,
                 "change_percent": change_percent,
-                "high": maximum,
-                "low": minimum,
+                "high": max(c.high for c in series.candles),
+                "low": min(c.low for c in series.candles),
                 "latest_timestamp": series.candles[-1].timestamp,
             },
             "analysis": engine.analyze_timeseries(normalized),
@@ -189,6 +192,42 @@ async def analyze_graph_image(
         return JSONResponse({"detail": f"그래프 이미지 분석 중 오류가 발생했습니다: {exc}"}, status_code=500)
 
 
-# Keep this mount last so the API routes above take precedence. This lets the
-# local app and a Cloudflare Quick Tunnel use one origin and one public URL.
-app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="web")
+class StockSoundRequest(ChartData):
+    min_frequency: float = config.DEFAULT_MIN_FREQ
+    max_frequency: float = config.DEFAULT_MAX_FREQ
+    min_amplitude: float = config.DEFAULT_MIN_AMPLITUDE
+    max_amplitude: float = config.DEFAULT_MAX_AMPLITUDE
+    duration_seconds: float = 8
+    waveform: str = "sine"
+    start_index: int = 0
+    end_index: Optional[int] = None
+    mapping_mode: str = "trend"
+
+
+@app.post("/sonify-stock")
+def sonify_stock(request: StockSoundRequest):
+    try:
+        output = generate_spatial_audio(
+            [c.close for c in request.candles], [c.volume for c in request.candles],
+            min_frequency=request.min_frequency, max_frequency=request.max_frequency,
+            min_amplitude=request.min_amplitude, max_amplitude=request.max_amplitude,
+            duration_seconds=request.duration_seconds, waveform_type=request.waveform,
+            start_index=request.start_index, end_index=request.end_index,
+            mapping_mode=request.mapping_mode)
+        return StreamingResponse(output, media_type="audio/wav")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+# Only public assets are exposed, never repository files or environment files.
+PUBLIC_FILES = {"index.html", "app.js", "navigator.js", "workspace.js", "tts.js", "style.css"}
+@app.get("/")
+def home():
+    return FileResponse(BASE_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/{name}")
+def public_file(name: str):
+    if name not in PUBLIC_FILES:
+        raise HTTPException(404)
+    return FileResponse(BASE_DIR / name, headers={"Cache-Control": "no-cache"})

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Callable, Dict, List, Optional
@@ -91,7 +93,7 @@ def _read_json(response) -> dict:
         raise StockDataError("Toss Securities returned an invalid JSON response") from exc
 
 
-def _issue_access_token(client_id: str, client_secret: str, base_url: str, opener: Callable) -> str:
+def _issue_access_token(client_id: str, client_secret: str, base_url: str, opener: Callable) -> tuple:
     body = urlencode(
         {"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret}
     ).encode("utf-8")
@@ -106,7 +108,67 @@ def _issue_access_token(client_id: str, client_secret: str, base_url: str, opene
     token = payload.get("access_token")
     if not token:
         raise StockDataError(payload.get("error_description", "Access token was not returned"))
-    return str(token)
+    try:
+        expires_in = float(payload.get("expires_in") or DEFAULT_TOKEN_TTL_SECONDS)
+    except (TypeError, ValueError):
+        expires_in = DEFAULT_TOKEN_TTL_SECONDS
+    return str(token), expires_in
+
+
+# Access tokens are reused until shortly before they expire. Issuing a new token
+# for every request doubled the request count and made 429 rate limits likely.
+DEFAULT_TOKEN_TTL_SECONDS = 300.0
+TOKEN_EXPIRY_MARGIN_SECONDS = 60.0
+_TOKEN_CACHE: Dict[tuple, tuple] = {}
+_TOKEN_LOCK = threading.Lock()
+
+
+def clear_token_cache() -> None:
+    with _TOKEN_LOCK:
+        _TOKEN_CACHE.clear()
+
+
+def _get_access_token(client_id: str, client_secret: str, base_url: str, opener: Callable, force: bool = False) -> str:
+    key = (base_url, client_id)
+    now = time.monotonic()
+    with _TOKEN_LOCK:
+        cached = _TOKEN_CACHE.get(key)
+        if cached and not force and cached[1] > now:
+            return cached[0]
+    token, expires_in = _issue_access_token(client_id, client_secret, base_url, opener)
+    lifetime = max(0.0, expires_in - TOKEN_EXPIRY_MARGIN_SECONDS)
+    with _TOKEN_LOCK:
+        if lifetime > 0:
+            _TOKEN_CACHE[key] = (token, time.monotonic() + lifetime)
+        else:
+            _TOKEN_CACHE.pop(key, None)
+    return token
+
+
+class _TossSession:
+    """Authorized GET helper that refreshes a cached token once on HTTP 401."""
+
+    def __init__(self, client_id: str, client_secret: str, base_url: str, opener: Callable):
+        self.client_id, self.client_secret = client_id, client_secret
+        self.base_url, self.opener = base_url, opener
+        self.token = _get_access_token(client_id, client_secret, base_url, opener)
+
+    def get_json(self, path: str) -> dict:
+        for attempt in range(2):
+            request = Request(
+                f"{self.base_url}{path}",
+                headers={"Authorization": f"Bearer {self.token}", "Accept": "application/json"},
+            )
+            try:
+                with self.opener(request, timeout=10) as response:
+                    return _read_json(response)
+            except HTTPError as error:
+                if error.code != 401 or attempt:
+                    raise
+                self.token = _get_access_token(
+                    self.client_id, self.client_secret, self.base_url, self.opener, force=True
+                )
+        raise StockDataError("Toss Securities authorization failed")
 
 
 def _parse_candles(payload: dict, symbol: str, interval: str, count: int) -> StockSeries:
@@ -201,7 +263,7 @@ def fetch_stock_rankings(
 
     base_url = os.getenv("TOSSINVEST_API_BASE_URL", DEFAULT_API_BASE_URL).rstrip("/")
     try:
-        token = _issue_access_token(resolved_id, resolved_secret, base_url, opener)
+        session = _TossSession(resolved_id, resolved_secret, base_url, opener)
         query = urlencode({
             "type": ranking_type,
             "marketCountry": market_country,
@@ -209,12 +271,7 @@ def fetch_stock_rankings(
             "excludeInvestmentCaution": str(exclude_investment_caution).lower(),
             "count": count,
         })
-        request = Request(
-            f"{base_url}/api/v1/rankings?{query}",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-        )
-        with opener(request, timeout=10) as response:
-            payload = _read_json(response)
+        payload = session.get_json(f"/api/v1/rankings?{query}")
         result = payload.get("result", {})
         values = result.get("rankings")
         if not isinstance(values, list):
@@ -225,12 +282,7 @@ def fetch_stock_rankings(
         names: Dict[str, str] = {}
         if symbols:
             stock_query = urlencode({"symbols": ",".join(symbols)})
-            stock_request = Request(
-                f"{base_url}/api/v1/stocks?{stock_query}",
-                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-            )
-            with opener(stock_request, timeout=10) as response:
-                names = _parse_stock_names(_read_json(response))
+            names = _parse_stock_names(session.get_json(f"/api/v1/stocks?{stock_query}"))
 
         rankings = []
         for value in values:
@@ -298,7 +350,7 @@ def fetch_recent_candles(
 
     base_url = os.getenv("TOSSINVEST_API_BASE_URL", DEFAULT_API_BASE_URL).rstrip("/")
     try:
-        token = _issue_access_token(resolved_id, resolved_secret, base_url, opener)
+        session = _TossSession(resolved_id, resolved_secret, base_url, opener)
         api_interval = "1m" if interval in DERIVED_MINUTES else interval
         raw_candles: Dict[str, Candle] = {}
         before = None
@@ -308,12 +360,7 @@ def fetch_recent_candles(
                             "adjusted": "true"}
             if before:
                 query_values["before"] = before
-            request = Request(
-                f"{base_url}/api/v1/candles?{urlencode(query_values)}",
-                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-            )
-            with opener(request, timeout=10) as response:
-                payload = _read_json(response)
+            payload = session.get_json(f"/api/v1/candles?{urlencode(query_values)}")
             page = _parse_candles(payload, symbol, api_interval, 200)
             for candle in page.candles:
                 raw_candles[candle.timestamp] = candle

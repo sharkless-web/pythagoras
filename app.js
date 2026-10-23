@@ -300,7 +300,7 @@ async function loadStockData(demo = false, background = false) {
             const previous = currentStockPayload.candles.at(-1);
             const latest = payload.candles.at(-1);
             if (previous?.timestamp === latest?.timestamp && previous?.close === latest?.close && previous?.volume === latest?.volume) {
-                document.getElementById('stockRefreshStatus').textContent = `마지막 확인 ${new Date().toLocaleTimeString('ko-KR')}. 새 봉 없음. 최근 봉 ${formatTimestamp(latest.timestamp)}.`;
+                document.getElementById('stockRefreshStatus').textContent = `마지막 확인 ${new Date().toLocaleTimeString('ko-KR')}. 새 봉 없음. 최근 봉 ${formatTimestamp(latest.timestamp, payload.interval === '1d')}.`;
                 return;
             }
             stopAllAudio();
@@ -322,7 +322,7 @@ async function loadStockData(demo = false, background = false) {
         const firstCandle = stockCandles[0], lastCandle = stockCandles[stockCandles.length - 1];
         const largest = stockCandles.reduce((a,b) => Number(a.volume) > Number(b.volume) ? a : b);
         const change = (lastCandle.close / firstCandle.close - 1) * 100;
-        document.getElementById("stockSummary").textContent = chartSummaryText({symbol:payload.name}, {
+        document.getElementById("stockSummary").textContent = chartSummaryText({symbol:payload.name, timeframe:payload.interval}, {
             count:stockCandles.length, start:firstCandle.timestamp, end:lastCandle.timestamp,
             start_close:firstCandle.close, end_close:lastCandle.close, change_percent:change,
             high:Math.max(...stockCandles.map(c=>c.high)), low:Math.min(...stockCandles.map(c=>c.low)),
@@ -335,7 +335,7 @@ async function loadStockData(demo = false, background = false) {
         else document.getElementById("playPauseBtn").focus();
         const derived = ['5m','15m','60m'].includes(interval) ? ' (실제 1분봉 합산)' : '';
         status.innerText = `${payload.name}, ${INTERVAL_LABELS[interval]}${derived} ${stockData.length}개를 불러왔습니다. 공간음향을 재생할 수 있습니다.`;
-        document.getElementById('stockRefreshStatus').textContent = `${payload.source === 'tossinvest' ? '실데이터' : '샘플'} 마지막 확인 ${new Date().toLocaleTimeString('ko-KR')}. 최근 봉 ${formatTimestamp(payload.metrics.latest_timestamp)}. 실데이터는 1분마다 자동 확인합니다.`;
+        document.getElementById('stockRefreshStatus').textContent = `${payload.source === 'tossinvest' ? '실데이터' : '샘플'} 마지막 확인 ${new Date().toLocaleTimeString('ko-KR')}. 최근 봉 ${formatTimestamp(payload.metrics.latest_timestamp, payload.interval === '1d')}. 실데이터는 1분마다 자동 확인합니다.`;
         lastStockRequest = {symbol, interval, count};
         document.getElementById('refreshStockBtn').disabled = false;
         document.getElementById("selectedStock").textContent = `선택 종목: ${payload.name} (${payload.symbol})`;
@@ -389,7 +389,7 @@ function renderStockSummary(payload) {
     document.getElementById("metricChange").className = metrics.change > 0 ? "up" : metrics.change < 0 ? "down" : "";
     document.getElementById("metricHigh").innerText = formatPrice(metrics.high, currency);
     document.getElementById("metricLow").innerText = formatPrice(metrics.low, currency);
-    document.getElementById("stockTimestamp").innerText = `최근 봉 시각: ${formatTimestamp(metrics.latest_timestamp)}`;
+    document.getElementById("stockTimestamp").innerText = `최근 봉 시각: ${formatTimestamp(metrics.latest_timestamp, payload.interval === '1d')}`;
 }
 
 // Dates are written with Korean units ("2026년 10월 23일 오후 5시 47분") so that speech
@@ -1060,7 +1060,8 @@ const SHORTCUTS = {
     PageUp: ['PageUp / J: 이전 구간', () => moveActiveSegment(-1)], PageDown: ['PageDown / K: 다음 구간', () => moveActiveSegment(1)],
     j: ['', () => moveActiveSegment(-1)], k: ['', () => moveActiveSegment(1)],
     r: ['R: 전체 처음부터 재생', restartActiveAudio], p: ['P: 현재 봉 요약', () => announceCurrentPosition()],
-    d: ['D: 현재 봉 상세', () => announceCurrentPosition(true)], s: ['S: 설정 안내', announceSettings],
+    d: ['D: 현재 봉 상세', () => announceCurrentPosition(true)], o: ['O: 전체 차트 요약', readStockSummary],
+    s: ['S: 설정 안내', announceSettings],
     '[': ['[: 속도 감소', () => changePlaybackSpeed(-1)], ']': [']: 속도 증가', () => changePlaybackSpeed(1)],
     Escape: ['Escape: 모든 소리 정지', stopAllAudio],
     g: ['G: 종목 순위', () => document.getElementById('rankingHeading').focus()],
@@ -1084,6 +1085,7 @@ const SPOKEN_SHORTCUTS = [
     ['알 키', '전체 처음부터 재생'],
     ['피 키', '현재 봉 요약'],
     ['디 키', '현재 봉 상세 정보'],
+    ['오 키', '전체 차트 요약'],
     ['에스 키', '현재 설정 안내'],
     ['왼쪽 대괄호 키', '속도 감소'],
     ['오른쪽 대괄호 키', '속도 증가'],

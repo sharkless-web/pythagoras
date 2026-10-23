@@ -1,5 +1,7 @@
 function chartSummaryText(chart, summary, currency) {
-    return `${chart.symbol}. 데이터 ${summary.count}개, ${formatTimestamp(summary.start)}부터 ${formatTimestamp(summary.end)}까지. 시작 종가 ${formatPrice(summary.start_close,currency)}, 마지막 종가 ${formatPrice(summary.end_close,currency)}. 전체 종가 ${Math.abs(summary.change_percent).toFixed(2)}퍼센트 ${summary.direction}. 최고가 ${formatPrice(summary.high,currency)}, 최저가 ${formatPrice(summary.low,currency)}. 최대 거래량 ${Intl.NumberFormat('ko-KR').format(summary.max_volume)}주, ${formatTimestamp(summary.max_volume_timestamp)}. 전체 차트의 최저·최고 종가를 음역에 대응하므로 작은 등락도 크게 들릴 수 있습니다.`;
+    // Daily candles carry a midnight timestamp, so give them the date only.
+    const daily = chart.timeframe === '1d';
+    return `${chart.symbol}. 데이터 ${summary.count}개, ${formatTimestamp(summary.start, daily)}부터 ${formatTimestamp(summary.end, daily)}까지. 시작 종가 ${formatPrice(summary.start_close,currency)}, 마지막 종가 ${formatPrice(summary.end_close,currency)}. 전체 종가 ${Math.abs(summary.change_percent).toFixed(2)}퍼센트 ${summary.direction}. 최고가 ${formatPrice(summary.high,currency)}, 최저가 ${formatPrice(summary.low,currency)}. 최대 거래량 ${Intl.NumberFormat('ko-KR').format(summary.max_volume)}주, ${formatTimestamp(summary.max_volume_timestamp, daily)}. 전체 차트의 최저·최고 종가를 음역에 대응하므로 작은 등락도 크게 들릴 수 있습니다.`;
 }
 
 document.getElementById('applyROIBtn').addEventListener('click', () => {

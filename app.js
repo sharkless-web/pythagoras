@@ -244,7 +244,8 @@ async function loadStockRankings() {
     } catch (error) {
         if (requestId !== rankingRequestId) return;
         document.getElementById("rankingList").replaceChildren();
-        status.innerText = `${error.message} 종목명이나 코드를 직접 입력할 수도 있습니다.`;
+        const reason = error instanceof TypeError ? "서버에 연결할 수 없습니다." : error.message;
+        status.innerText = `순위를 불러오지 못했습니다. ${reason} 종목명이나 코드를 직접 입력할 수도 있습니다.`;
     } finally {
         if (requestId === rankingRequestId) {
             browser.setAttribute("aria-busy", "false");
@@ -360,7 +361,10 @@ async function loadStockData(demo = false, background = false) {
         const source = document.getElementById("stockSource");
         source.innerText = "실데이터 연결 실패";
         source.className = "source-badge error";
-        status.innerText = "차트를 불러오지 못했습니다. 서버 연결 또는 데이터 공급자 설정을 확인한 후 다시 시도하세요.";
+        const reason = error instanceof TypeError
+            ? "서버에 연결할 수 없습니다. 서버가 켜져 있는지 확인하세요."
+            : error.message;
+        status.innerText = `차트를 불러오지 못했습니다. ${reason}`;
         console.error("[Chart load]", error.message);
         document.getElementById("loadStockBtn").focus();
     } finally {

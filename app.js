@@ -392,9 +392,18 @@ function renderStockSummary(payload) {
     document.getElementById("stockTimestamp").innerText = `최근 봉 시각: ${formatTimestamp(metrics.latest_timestamp)}`;
 }
 
-function formatTimestamp(value) {
+// Dates are written with Korean units ("2026년 10월 23일 오후 5시 47분") so that speech
+// engines and screen readers announce them as dates. The compact "2026. 10. 23. 오후 5:47"
+// form was read as a run of unrelated numbers.
+function formatTimestamp(value, dateOnly = false) {
     const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "short" }).format(date);
+    if (Number.isNaN(date.getTime())) return value;
+    const day = `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일`;
+    if (dateOnly) return day;
+    const hours = date.getHours(), minutes = date.getMinutes();
+    const period = hours < 12 ? "오전" : "오후";
+    const hour12 = hours % 12 || 12;
+    return `${day} ${period} ${hour12}시${minutes ? ` ${minutes}분` : ""}`;
 }
 
 function readStockSummary() {
@@ -957,25 +966,26 @@ function pointText(index, detailed = false) {
     const price = activeSeries.prices[index];
     const volume = activeSeries.volumes?.[index];
     const volumeText = volume == null ? '정보 없음' : `${Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 }).format(volume)}주`;
-    const date = formatTimestamp(activeSeries.timestamps?.[index] || '시각 정보 없음');
+    const date = formatTimestamp(activeSeries.timestamps?.[index] || '시각 정보 없음', activeSeries.timeframe === '1d');
     const prev = activeSeries.prices[index - 1];
     const pct = index && prev ? (price / prev - 1) * 100 : null;
     const comparison = activeSeries.timeframe === '1d' ? '이전 거래일 종가 대비' : '이전 봉 종가 대비';
     const change = pct == null ? '이전 봉 비교 정보 없음' : `${comparison} ${Math.abs(pct).toFixed(2)}퍼센트 ${pct > 0 ? '상승' : pct < 0 ? '하락' : '동일'}`;
-    return `${index + 1}번째 봉, ${date}. ${detailed && c ? `시가 ${formatActivePrice(c.open)}, 고가 ${formatActivePrice(c.high)}, 저가 ${formatActivePrice(c.low)}, ` : ''}종가 ${formatActivePrice(price)}. ${change}. 거래량 ${volumeText}.`;
+    return `전체 ${activeSeries.prices.length}개 중 ${index + 1}번째 봉, ${date}. ${detailed && c ? `시가 ${formatActivePrice(c.open)}, 고가 ${formatActivePrice(c.high)}, 저가 ${formatActivePrice(c.low)}, ` : ''}종가 ${formatActivePrice(price)}. ${change}. 거래량 ${volumeText}.`;
 }
 function renderActivePoint(index) {
     if (!activeSeries) return;
     const bounded = chartNavigator.seek(index);
-    const percentage = activeSeries.prices.length > 1 ? Math.round(bounded / (activeSeries.prices.length - 1) * 100) : 100;
     const text = pointText(bounded);
-    document.getElementById('currentPosition').textContent = `${percentage}% · ${bounded + 1}/${activeSeries.prices.length}`;
+    // Position is stated in words ("전체 30개 중 4번째"): "10% · 4/30" was read aloud as
+    // an unexplained percentage and "삼십 분의 사".
+    document.getElementById('currentPosition').textContent = `전체 ${activeSeries.prices.length}개 중 ${bounded + 1}번째`;
     document.getElementById('currentPointDetail').textContent = text;
     const slider = document.getElementById('positionSlider');
-    slider.value = bounded; slider.setAttribute('aria-valuetext', `${percentage}퍼센트, ${text}`);
+    slider.value = bounded; slider.setAttribute('aria-valuetext', text);
 }
 function announceCurrentPosition(detailed = false, explicit = true) {
-    if (activeSeries) speakText(`${document.getElementById('currentPosition').textContent}. ${pointText(chartNavigator.currentIndex, detailed === true)}`, explicit);
+    if (activeSeries) speakText(pointText(chartNavigator.currentIndex, detailed === true), explicit);
 }
 const speechController = new SpeechController(window.speechSynthesis, window.SpeechSynthesisUtterance, (text, state) => {
     const status = document.getElementById('speechStatus');
@@ -1060,6 +1070,34 @@ const SHORTCUTS = {
     a: ['A: 이미지 분석', () => { if (selectedImageFile) analyzeImage(); }]
 };
 Object.values(SHORTCUTS).filter(([label]) => label).forEach(([label]) => { const li = document.createElement('li'); li.textContent = label; document.getElementById('shortcutHelp').append(li); });
+// Spoken form of each shortcut: symbols such as "/" and "[" are skipped or misread by
+// speech engines, and a bare list runs keys into the previous item's description.
+// Each entry becomes one sentence that names the key in words, then its action.
+const SPOKEN_SHORTCUTS = [
+    ['스페이스 키', '재생과 일시정지'],
+    ['왼쪽 방향키', '이전 봉'],
+    ['오른쪽 방향키', '다음 봉'],
+    ['홈 키', '첫 봉'],
+    ['엔드 키', '마지막 봉'],
+    ['페이지 업 키 또는 제이 키', '이전 구간'],
+    ['페이지 다운 키 또는 케이 키', '다음 구간'],
+    ['알 키', '전체 처음부터 재생'],
+    ['피 키', '현재 봉 요약'],
+    ['디 키', '현재 봉 상세 정보'],
+    ['에스 키', '현재 설정 안내'],
+    ['왼쪽 대괄호 키', '속도 감소'],
+    ['오른쪽 대괄호 키', '속도 증가'],
+    ['이스케이프 키', '모든 소리 정지'],
+    ['지 키', '종목 순위로 이동'],
+    ['슬래시 키', '종목 검색으로 이동'],
+    ['엘 키', '입력한 종목 조회'],
+    ['아이 키', '그래프 이미지 입력'],
+    ['에이 키', '그래프 이미지 분석'],
+];
+function spokenShortcutHelp() {
+    const items = SPOKEN_SHORTCUTS.map(([key, action]) => `${key}, ${action}.`);
+    return `단축키 ${items.length}개를 안내합니다. 재생기에 초점이 있을 때 동작합니다. ${items.join(' ')}`;
+}
 document.addEventListener('keydown', e => {
     if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -1141,7 +1179,7 @@ document.getElementById('speedSelect').addEventListener('change', async e => {
     document.getElementById('speedState').textContent = `속도 ${playbackSpeed}배`;
     if (activeSeries) await rebuildActiveAudio(true);
 });
-document.getElementById('readShortcutsBtn').addEventListener('click', () => speakText(document.getElementById('shortcutHelp').textContent));
+document.getElementById('readShortcutsBtn').addEventListener('click', () => speakText(spokenShortcutHelp()));
 document.getElementById('speechToggle').addEventListener('change', cancelSpeech);
 setInterval(() => {
     if (document.hidden || document.getElementById('loadStockBtn').disabled) return;

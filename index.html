@@ -3,37 +3,35 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>피타고라스 — 주식 차트 공간음향</title>
-  <link rel="stylesheet" href="style.css?v=20261010-live-candles">
+  <title>피타고라스 — 듣고 탐색하는 주식 차트</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="style.css?v=20261023-speech">
   <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
 </head>
 <body>
-  <a class="skip-link" href="#stockSearch">종목 검색으로 바로가기</a><a class="skip-link" href="#settingsHeading">설정으로 바로가기</a>
-
-
+  <a class="skip-link" href="#stockSearch">종목 검색으로 바로가기</a>
+  <a class="skip-link" href="#settingsHeading">설정으로 바로가기</a>
 
   <main class="main-content" id="mainContent">
     <header class="hero">
-      <p class="eyebrow">Accessible Stock Chart Sonification</p>
-      <h1>주식 차트의 흐름을<br>공간음향으로 이해하세요</h1>
-      <p>종가의 등락, 거래량의 크기, 시간의 방향을 하나의 스테레오 음향으로 결합해 차트를 듣고 탐색합니다.</p>
+      <p class="brand">피타고라스</p>
+      <h1>주식 차트를 귀로 읽습니다</h1>
+      <p class="hero-lede">가격은 음높이, 거래량은 음량, 시간은 왼쪽에서 오른쪽으로 들립니다. 헤드폰을 쓰면 가장 잘 들립니다.</p>
     </header>
-
-    <ol class="workflow" aria-label="주식 차트 탐색 순서">
-      <li><span>1</span> 데이터 불러오기</li><li><span>2</span> 핵심 수치 확인</li><li><span>3</span> 공간음향 듣기</li><li><span>4</span> 구간 탐색</li>
-    </ol>
 
     <section class="panel stock-panel" id="stockService" aria-labelledby="stockHeading">
       <div class="section-head">
-        <div><p class="step-label">1단계</p><h2 id="stockHeading">실시간 종목 선택</h2></div>
+        <h2 id="stockHeading"><span class="step-label">1</span>종목 선택</h2>
         <span class="source-badge neutral" id="stockSource" role="status">조회 전</span>
       </div>
 
       <div class="stock-controls">
-        <label for="stockSearch">종목명 또는 종목 코드
+        <label for="stockSearch" class="field-search">종목명 또는 종목 코드
           <input id="stockSearch" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="searchResults" value="삼성전자" autocomplete="off" aria-describedby="stockSymbolHelp">
           <ul id="searchResults" role="listbox" aria-label="종목 검색 결과" hidden></ul>
           <datalist id="stockSuggestions" hidden>
@@ -48,79 +46,104 @@
           <select id="stockCount"><option value="30">30개</option><option value="60">60개</option><option value="120">120개</option><option value="200">200개</option></select>
         </label>
       </div>
-      <p id="stockSymbolHelp" class="field-help">검색 결과는 ↑↓로 이동하고 Enter로 선택합니다. 검색 결과가 없으면 종목 코드를 직접 입력할 수 있습니다.</p>
+      <p id="stockSymbolHelp" class="field-help">↑↓로 검색 결과를 고르고 Enter로 선택합니다. 목록에 없으면 종목 코드를 직접 입력하세요.</p>
       <div class="button-row">
         <button class="btn-primary" id="loadStockBtn" type="button">차트 불러오기</button>
         <button class="btn-secondary" id="refreshStockBtn" type="button" disabled>현재 차트 새로고침</button>
-
       </div>
-      <p id="selectedStock" role="status" aria-live="polite">선택 종목: 삼성전자 (005930)</p><div id="stockStatus" class="status" role="status" aria-live="polite">종목을 선택한 뒤 실시간 데이터를 조회하세요.</div>
-      <p id="stockRefreshStatus" class="field-help">실데이터 차트는 1분마다 자동으로 확인합니다. 장이 닫힌 동안에는 마지막 봉이 유지됩니다.</p>
-
-
+      <p id="selectedStock" class="selected-stock">선택 종목: 삼성전자 (005930)</p>
+      <div id="stockStatus" class="status" role="status" aria-live="polite">종목을 고른 뒤 차트를 불러오세요.</div>
+      <p id="stockRefreshStatus" class="field-help">실데이터 차트는 1분마다 새 봉을 확인합니다. 장이 닫힌 동안에는 마지막 봉이 유지됩니다.</p>
     </section>
 
-      <section id="stockResults" hidden aria-labelledby="summaryHeading">
-        <div class="result-heading">
-          <div><p class="step-label">2단계</p><h3 id="summaryHeading" tabindex="-1"><span id="stockName">종목</span> 핵심 정보</h3></div>
+    <section id="stockResults" class="panel results-panel" hidden aria-labelledby="summaryHeading">
+      <div class="result-heading">
+        <h2 id="summaryHeading" tabindex="-1"><span class="step-label">2</span><span id="stockName">종목</span></h2>
+      </div>
+      <dl class="metric-grid">
+        <div class="metric primary-metric"><dt>최근 종가</dt><dd id="metricLatest">-</dd></div>
+        <div class="metric"><dt>조회 구간 변화</dt><dd id="metricChange">-</dd></div>
+        <div class="metric"><dt>구간 최고</dt><dd id="metricHigh">-</dd></div>
+        <div class="metric"><dt>구간 최저</dt><dd id="metricLow">-</dd></div>
+      </dl>
+      <div class="stock-chart-shell" aria-hidden="true">
+        <canvas id="stockChart" aria-label="조회한 주식의 캔들, 이동평균과 거래량 차트"></canvas>
+      </div>
+      <p class="chart-help">빨간 캔들은 상승, 파란 캔들은 하락입니다. 정확한 값은 아래 재생기에서 확인할 수 있습니다.</p>
+    </section>
 
-        </div>
-        <dl class="metric-grid">
-          <div class="metric primary-metric"><dt>최근 종가</dt><dd id="metricLatest">-</dd></div>
-          <div class="metric"><dt>조회 구간 변화</dt><dd id="metricChange">-</dd></div>
-          <div class="metric"><dt>구간 최고</dt><dd id="metricHigh">-</dd></div>
-          <div class="metric"><dt>구간 최저</dt><dd id="metricLow">-</dd></div>
-        </dl>
-        <div class="stock-chart-shell" aria-hidden="true">
-          <canvas id="stockChart" aria-label="조회한 주식의 캔들, 이동평균과 거래량 차트"></canvas>
-        </div>
-        <p class="chart-help">빨간 캔들은 상승, 파란 캔들은 하락을 나타냅니다. 정확한 값은 아래 공간음향 재생 위치에서 확인할 수 있습니다.</p>
-      </section>
     <section class="panel player-panel" id="playerControls" tabindex="0" aria-describedby="navigationHelp" aria-labelledby="playerHeading">
-      <p class="step-label">3·4단계</p>
-      <h2 id="playerHeading">공간음향 재생과 구간 탐색</h2>
-      <p>가격은 음높이, 거래량은 음량, 시간은 왼쪽에서 오른쪽으로 들립니다.</p>
-      <p id="activeSeriesLabel">종목을 선택하고 차트를 불러오세요.</p>
-      <audio id="spatialAudio" preload="metadata" aria-label="주식 차트 공간음향"></audio>
-      <div class="transport-controls" role="group" aria-label="공간음향 재생 컨트롤">
-        <button class="btn-primary" id="playPauseBtn" type="button" disabled aria-label="공간음향 재생">재생</button>
-        <button class="btn-secondary" id="pauseBtn" type="button" disabled>일시정지</button><button id="stopBtn" type="button" disabled>정지</button>
-      </div>
-      <label for="positionSlider">재생 위치 탐색</label>
-      <input id="positionSlider" type="range" min="0" max="0" value="0" step="1" disabled aria-describedby="currentPointDetail">
-      <div id="currentPointDetail" class="candle-detail">주식 데이터를 조회하면 현재 시가, 고가, 저가, 종가와 거래량을 확인할 수 있습니다.</div>
-<div class="button-row">        <button class="btn-secondary" id="restartBtn" type="button" disabled>처음부터</button>
-        <button class="btn-secondary" id="previousSegmentBtn" type="button" disabled>이전 구간</button>
-        <button class="btn-secondary" id="nextSegmentBtn" type="button" disabled>다음 구간</button>
-
-
-        <button class="btn-secondary" id="announcePositionBtn" type="button" disabled>현재 위치 읽기</button>
-</div>
-      <div class="playback-state">
-        <strong id="playbackState" role="status" aria-live="polite">정지</strong><span id="speedState">속도 1배</span><span id="currentPosition">위치 정보 없음</span>
-      </div>
-      <p id="navigationHelp">이 재생 영역에 초점을 두면 Space로 재생하고 방향키로 봉을 탐색합니다. Tab으로 각 컨트롤에 접근합니다.</p>
-      <div class="button-row"><button id="detailBtn" type="button" disabled>현재 봉 상세정보</button></div>
-
-          <button class="btn-secondary" id="readStockBtn" type="button" disabled aria-label="현재 주식 차트 요약을 음성으로 읽기">요약 음성으로 읽기</button>        <div class="description-box">
-          <h3>전체 차트 요약</h3><p id="stockSummary" role="status" aria-live="polite" aria-atomic="true">-</p><p class="timestamp" id="stockTimestamp"></p>
+      <div class="section-head">
+        <h2 id="playerHeading"><span class="step-label">3</span>듣고 탐색하기</h2>
+        <div class="playback-state">
+          <strong id="playbackState" role="status" aria-live="polite">정지</strong>
+          <span id="speedState">속도 1배</span>
         </div>
-<details><summary>구간 재생 및 반복</summary>      <fieldset><legend>재생할 구간</legend><div class="stock-controls">
-        <label>재생 범위<select id="rangeMode"><option value="full">전체</option><option value="current">현재부터 끝까지</option><option value="previous">이전 N개 봉</option><option value="next">다음 N개 봉</option><option value="custom">직접 선택</option></select></label>
-        <label>구간 봉 개수<input id="segmentSize" type="number" min="1" max="10000" value="10"></label>
-        <label>시작 봉<input id="rangeStart" type="number" min="1" value="1"></label>
-        <label>끝 봉<input id="rangeEnd" type="number" min="1" value="1"></label>
-      </div><label><input id="repeatRange" type="checkbox"> 선택 구간 반복</label>
-      <button id="applyRangeBtn" type="button" disabled>구간 적용</button><p id="rangeStatus" role="status">전체 구간</p></fieldset>
-</details>
+      </div>
+      <p id="activeSeriesLabel" class="series-label">종목을 고르고 차트를 불러오세요.</p>
+      <audio id="spatialAudio" preload="metadata" aria-label="주식 차트 공간음향"></audio>
+
+      <div class="readout">
+        <div class="readout-top">
+          <span class="readout-label" aria-hidden="true">현재 봉</span>
+          <span id="currentPosition">위치 정보 없음</span>
+        </div>
+        <div id="currentPointDetail" class="candle-detail">차트를 불러오면 현재 봉의 시각, 종가, 거래량을 여기서 읽을 수 있습니다.</div>
+        <label for="positionSlider" class="slider-label">재생 위치 탐색</label>
+        <input id="positionSlider" type="range" min="0" max="0" value="0" step="1" disabled aria-describedby="currentPointDetail">
+        <div class="pan-scale" aria-hidden="true"><span>왼쪽 · 과거</span><span>오른쪽 · 최근</span></div>
+      </div>
+
+      <div class="transport-controls" role="group" aria-label="공간음향 재생 컨트롤">
+        <button class="btn-primary btn-play" id="playPauseBtn" type="button" disabled aria-label="공간음향 재생">재생</button>
+        <button class="btn-secondary" id="pauseBtn" type="button" disabled>일시정지</button>
+        <button class="btn-secondary" id="stopBtn" type="button" disabled>정지</button>
+      </div>
+      <div class="button-row nav-row">
+        <button class="btn-quiet" id="restartBtn" type="button" disabled>처음부터</button>
+        <button class="btn-quiet" id="previousSegmentBtn" type="button" disabled>이전 구간</button>
+        <button class="btn-quiet" id="nextSegmentBtn" type="button" disabled>다음 구간</button>
+        <button class="btn-quiet" id="announcePositionBtn" type="button" disabled>현재 위치 읽기</button>
+        <button class="btn-quiet" id="detailBtn" type="button" disabled>현재 봉 상세정보</button>
+      </div>
+      <p id="navigationHelp" class="field-help">재생기에 초점을 두면 Space로 재생하고 ←→로 봉을 하나씩 이동합니다. P는 현재 봉, D는 상세 수치를 읽습니다.</p>
+
+      <div class="description-box">
+        <div class="description-head">
+          <h3>전체 차트 요약</h3>
+          <button class="btn-secondary" id="readStockBtn" type="button" disabled aria-label="현재 주식 차트 요약을 음성으로 읽기">요약 음성으로 읽기</button>
+        </div>
+        <p id="stockSummary">-</p>
+        <p class="timestamp" id="stockTimestamp"></p>
+      </div>
+
+      <details class="range-details"><summary>구간 재생 및 반복</summary>
+        <fieldset><legend class="sr-only">재생할 구간</legend>
+          <div class="stock-controls range-controls">
+            <label>재생 범위<select id="rangeMode"><option value="full">전체</option><option value="current">현재부터 끝까지</option><option value="previous">이전 N개 봉</option><option value="next">다음 N개 봉</option><option value="custom">직접 선택</option></select></label>
+            <label>구간 봉 개수<input id="segmentSize" type="number" min="1" max="10000" value="10"></label>
+            <label>시작 봉<input id="rangeStart" type="number" min="1" value="1"></label>
+            <label>끝 봉<input id="rangeEnd" type="number" min="1" value="1"></label>
+          </div>
+          <div class="button-row">
+            <label class="check"><input id="repeatRange" type="checkbox"> 선택 구간 반복</label>
+            <button class="btn-secondary" id="applyRangeBtn" type="button" disabled>구간 적용</button>
+          </div>
+          <p id="rangeStatus" class="field-help" role="status">전체 구간</p>
+        </fieldset>
+      </details>
     </section>
 
-    <p><a href="#settingsHeading">사용 환경 설정으로 이동</a></p>
-    <section id="marketTools" class="panel" aria-labelledby="rankingHeading">
+    <p class="to-settings"><a href="#settingsHeading">사용 환경 설정으로 이동</a></p>
+
+    <section id="marketTools" class="panel market-panel" aria-labelledby="rankingHeading">
       <section class="ranking-browser" aria-labelledby="rankingHeading" aria-busy="true">
         <div class="ranking-heading">
-          <div><p class="market-state"><span aria-hidden="true"></span> 실시간 시장 순위</p><h3 id="rankingHeading" tabindex="-1">종목 둘러보기</h3></div>
-          <button class="ranking-refresh" id="refreshRankingsBtn" type="button" aria-label="현재 종목 순위 새로고침">순위 새로고침</button>
+          <div>
+            <p class="market-state"><span aria-hidden="true"></span>실시간 시장 순위</p>
+            <h2 id="rankingHeading" tabindex="-1">종목 둘러보기</h2>
+          </div>
+          <button class="btn-quiet ranking-refresh" id="refreshRankingsBtn" type="button" aria-label="현재 종목 순위 새로고침">새로고침</button>
         </div>
         <div class="market-switch" role="group" aria-label="시장 선택">
           <button type="button" class="market-tab is-active" data-market="KR" aria-pressed="true">국내</button>
@@ -139,59 +162,59 @@
           </label>
         </div>
         <div id="rankingStatus" class="ranking-status" role="status" aria-live="polite">실시간 종목 순위를 불러오는 중입니다.</div>
-        <div class="ranking-columns" aria-hidden="true"><span>순위·종목</span><span>현재가</span><span>등락률</span><span id="rankingMetricHeading">거래대금</span></div>
+        <div class="ranking-columns" aria-hidden="true"><span>종목</span><span>현재가</span><span>등락률</span><span id="rankingMetricHeading">거래대금</span></div>
         <ol id="rankingList" class="ranking-list" aria-label="주식 종목 순위"></ol>
       </section>
-
     </section>
+
     <details class="panel helper-panel" id="supportTools">
       <summary>보조 도구: 그래프 이미지 분석</summary>
-      <p>기사나 발표 자료에 포함된 선 그래프 또는 주식 캔들 이미지를 분석합니다.</p>
-      <div class="section-head"><h2>그래프 이미지 분석</h2><button class="btn-secondary" id="resetSelectionBtn" type="button">영역 초기화</button></div>
+      <p>기사나 발표 자료에 실린 선 그래프 또는 캔들 차트 이미지를 분석해 소리로 들려줍니다.</p>
+      <div class="section-head"><h2>그래프 이미지 분석</h2><button class="btn-quiet" id="resetSelectionBtn" type="button">영역 초기화</button></div>
       <div class="analysis-options">
         <label for="chartTypeSelect">차트 유형</label><select id="chartTypeSelect"><option value="line">일반 선 그래프</option><option value="candlestick" selected>주식 캔들 차트</option></select>
         <label for="candleColorSelect" id="candleColorLabel">캔들 색상 설정</label><select id="candleColorSelect"><option value="red_up_blue_down" selected>빨강 = 상승, 파랑 = 하락</option><option value="blue_up_red_down">파랑 = 상승, 빨강 = 하락</option><option value="auto">자동 추정</option></select>
       </div>
       <div id="candleGuide" class="guide-box">가격 차트 영역만 선택하면 캔들 종가 추출 정확도가 높아집니다.</div>
       <label class="upload-box" for="imageInput"><strong>그래프 이미지 업로드</strong><span>PNG, JPG 이미지 지원</span><input type="file" id="imageInput" accept="image/*"></label>
-      <fieldset><legend>이미지 분석 영역 (원본 픽셀)</legend><p>기본은 자동 분석입니다. 필요할 때 아래 숫자를 키보드로 조절한 뒤 영역을 적용하세요.</p><div class="stock-controls">
-      <label>X<input id="roiX" type="number" min="0" value="0"></label><label>Y<input id="roiY" type="number" min="0" value="0"></label><label>너비<input id="roiWidth" type="number" min="1" value="1"></label><label>높이<input id="roiHeight" type="number" min="1" value="1"></label></div><button id="applyROIBtn" type="button">영역 적용</button></fieldset>
+      <fieldset><legend>이미지 분석 영역 (원본 픽셀)</legend><p class="field-help">기본은 자동 분석입니다. 필요할 때 숫자를 조절한 뒤 영역을 적용하세요.</p>
+        <div class="stock-controls roi-controls">
+          <label>X<input id="roiX" type="number" min="0" value="0"></label><label>Y<input id="roiY" type="number" min="0" value="0"></label><label>너비<input id="roiWidth" type="number" min="1" value="1"></label><label>높이<input id="roiHeight" type="number" min="1" value="1"></label>
+        </div>
+        <div class="button-row"><button class="btn-secondary" id="applyROIBtn" type="button">영역 적용</button></div>
+      </fieldset>
       <div class="canvas-wrap" id="canvasWrap" hidden><canvas id="imageCanvas" aria-label="업로드된 그래프 이미지와 추출된 선 결과"></canvas></div>
-      <div class="button-row"><button class="btn-primary" id="analyzeImageBtn" type="button" disabled>선 추출 및 분석</button><button class="btn-primary" id="playGraphAudioBtn" type="button" disabled>음향 재생</button><button class="btn-secondary" id="readDescriptionBtn" type="button" disabled>설명 읽기</button></div>
+      <div class="button-row"><button class="btn-primary" id="analyzeImageBtn" type="button" disabled>선 추출 및 분석</button><button class="btn-secondary" id="playGraphAudioBtn" type="button" disabled>음향 재생</button><button class="btn-secondary" id="readDescriptionBtn" type="button" disabled>설명 읽기</button></div>
       <div id="imageStatus" class="status" role="status" aria-live="polite">이미지를 업로드하면 분석을 시작할 수 있습니다.</div>
       <section class="description-box" aria-live="polite"><h3>스크린리더용 그래프 설명</h3><p id="graphSummary">아직 분석된 그래프가 없습니다.</p><ul id="descriptionList"></ul></section>
       <section class="debug-wrap" id="debugWrap" hidden><h3>추출 결과 확인</h3><img id="debugImage" alt="이미지에서 추출한 시계열 경로 확인 화면"></section>
       <audio id="graphAudio"></audio>
     </details>
   </main>
+
   <aside class="sidebar" id="settingsPanel" aria-labelledby="settingsHeading">
-    <div>
-      <p class="product-kicker">PYTHAGORAS</p>
+    <div class="sidebar-head">
       <h2 id="settingsHeading" tabindex="-1">사용 환경 설정</h2>
-      <p>주가는 음높이로, 거래량은 음량으로, 시간은 좌우 공간 위치로 탐색합니다.</p>
+      <nav aria-label="페이지 영역">
+        <a href="#stockSearch">종목 검색으로 돌아가기</a>
+        <a href="#playerControls">재생기로 돌아가기</a>
+        <a href="#supportTools">그래프 이미지 분석</a>
+      </nav>
     </div>
 
-    <nav aria-label="페이지 영역">
-      <a href="#stockSearch">종목 검색으로 돌아가기</a>
-      <a href="#playerControls">공간음향 재생기</a>
-      <a href="#supportTools">그래프 이미지 분석</a>
-    </nav>
-
     <section class="control-group">
-      <h2>접근성 설정</h2><button id="settingsBtn" type="button">현재 설정 음성 안내</button><label><input id="speechToggle" type="checkbox"> 탐색 시 자동 음성 안내</label><p>자동 안내가 꺼져 있어도 읽기 버튼은 음성으로 안내합니다. 스크린리더용 텍스트는 항상 제공됩니다.</p>
-      <label><input type="checkbox" id="contrastToggle"> 고대비 모드</label>
+      <h3>접근성</h3>
+      <label class="check"><input id="speechToggle" type="checkbox"> 탐색 시 자동 음성 안내</label>
+      <p class="field-help">꺼져 있어도 읽기 버튼은 음성으로 안내합니다. 스크린리더용 텍스트는 항상 제공됩니다.</p>
+      <label class="check"><input type="checkbox" id="contrastToggle"> 고대비 모드</label>
+      <button class="btn-secondary" id="settingsBtn" type="button">현재 설정 음성 안내</button>
     </section>
 
     <section class="control-group">
-      <h2>음향 설정</h2><label for="speedSelect">재생 속도</label><select id="speedSelect"><option value="0.5">0.5배</option><option value="0.75">0.75배</option><option value="1" selected>1배</option><option value="1.25">1.25배</option><option value="1.5">1.5배</option><option value="2">2배</option></select><div class="button-row"><button id="slowerBtn" type="button" disabled>속도 감소</button><button id="fasterBtn" type="button" disabled>속도 증가</button></div>
-      <label for="minFreqSlider">최소 음높이 <span id="minFreqVal">200</span>Hz</label>
-      <input type="range" id="minFreqSlider" min="80" max="1000" step="10" value="200">
-      <label for="freqSlider">최대 음높이 <span id="freqVal">800</span>Hz</label>
-      <input type="range" id="freqSlider" min="300" max="5000" step="50" value="800">
-      <label for="minAmplitudeSlider">최소 음량 <span id="minAmplitudeVal">25</span>%</label>
-      <input type="range" id="minAmplitudeSlider" min="0.05" max="0.8" step="0.05" value="0.25">
-      <label for="maxAmplitudeSlider">최대 음량 <span id="maxAmplitudeVal">85</span>%</label>
-      <input type="range" id="maxAmplitudeSlider" min="0.2" max="1" step="0.05" value="0.85">
+      <h3>재생</h3>
+      <label for="speedSelect">재생 속도</label>
+      <select id="speedSelect"><option value="0.5">0.5배</option><option value="0.75">0.75배</option><option value="1" selected>1배</option><option value="1.25">1.25배</option><option value="1.5">1.5배</option><option value="2">2배</option></select>
+      <div class="button-row tight"><button class="btn-quiet" id="slowerBtn" type="button" disabled>속도 감소</button><button class="btn-quiet" id="fasterBtn" type="button" disabled>속도 증가</button></div>
       <label for="masterVolumeSlider">전체 재생 음량 <span id="masterVolumeVal">80</span>%</label>
       <input type="range" id="masterVolumeSlider" min="0" max="1" step="0.05" value="0.8">
       <label for="waveSelect">소리 종류</label>
@@ -204,11 +227,27 @@
       </select>
     </section>
 
-    <section class="info-box">
-      <h2>키보드 사용법</h2><p>문자 단축키는 재생 영역 안에서 동작합니다. 스크린리더가 키를 사용하는 경우 버튼을 사용하거나 포커스 모드로 전환하세요.</p><button id="readShortcutsBtn" type="button">단축키 음성 안내</button><ul id="shortcutHelp"></ul>
+    <section class="control-group">
+      <h3>음높이와 음량 범위</h3>
+      <label for="minFreqSlider">최소 음높이 <span id="minFreqVal">200</span>Hz</label>
+      <input type="range" id="minFreqSlider" min="80" max="1000" step="10" value="200">
+      <label for="freqSlider">최대 음높이 <span id="freqVal">800</span>Hz</label>
+      <input type="range" id="freqSlider" min="300" max="5000" step="50" value="800">
+      <label for="minAmplitudeSlider">최소 음량 <span id="minAmplitudeVal">25</span>%</label>
+      <input type="range" id="minAmplitudeSlider" min="0.05" max="0.8" step="0.05" value="0.25">
+      <label for="maxAmplitudeSlider">최대 음량 <span id="maxAmplitudeVal">85</span>%</label>
+      <input type="range" id="maxAmplitudeSlider" min="0.2" max="1" step="0.05" value="0.85">
+    </section>
+
+    <section class="control-group info-box">
+      <h3>키보드 사용법</h3>
+      <p class="field-help">문자 단축키는 재생기 안에서 동작합니다. 스크린리더가 키를 가로채면 버튼을 쓰거나 포커스 모드로 전환하세요.</p>
+      <ul id="shortcutHelp"></ul>
+      <button class="btn-secondary" id="readShortcutsBtn" type="button">단축키 음성 안내</button>
     </section>
   </aside>
   <div id="accessibleAnnouncement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
-  <p id="speechStatus" role="status" aria-live="polite" aria-atomic="true"></p><script src="tts.js"></script><script src="navigator.js"></script><script src="app.js?v=20261010-live-candles"></script><script src="workspace.js?v=20261010-live-candles"></script>
+  <p id="speechStatus" class="speech-status" role="status" aria-live="polite" aria-atomic="true"></p>
+  <script src="tts.js"></script><script src="navigator.js"></script><script src="app.js?v=20261023-speech"></script><script src="workspace.js?v=20261023-speech"></script>
 </body>
 </html>

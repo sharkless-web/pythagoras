@@ -27,3 +27,6 @@ Thumbs.db
 .tools/
 
 .test-deps/
+
+# Exhibition tunnel address (changes on every run)
+tunnel-url.txt

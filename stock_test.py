@@ -9,7 +9,7 @@ from urllib.error import URLError
 
 import engine
 import server
-from stock_service import Candle, StockDataError, aggregate_minute_candles, fetch_recent_candles, fetch_stock_rankings, get_close_prices
+from stock_service import Candle, StockDataError, clear_token_cache, aggregate_minute_candles, fetch_recent_candles, fetch_stock_rankings, get_close_prices
 
 
 class FakeResponse:
@@ -39,6 +39,9 @@ class FakeOpener:
 
 
 class StockServiceTest(unittest.TestCase):
+    def setUp(self):
+        clear_token_cache()
+
     def test_sample_fallback_returns_close_prices(self):
         with patch.dict(os.environ, {}, clear=True):
             series = fetch_recent_candles("005930", count=30)
